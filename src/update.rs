@@ -65,12 +65,16 @@ pub fn parse_checksum(text: &str, name: &str) -> Option<String> {
     })
 }
 
-/// 下载后的临时文件名（Windows 必须保留 .exe 才能执行）
+/// 下载后的临时文件名
+///
+/// - Windows 必须保留 `.exe` 才能执行；
+/// - 带上进程号，避免多个 `mtrim update` 并发时互相删除临时文件。
 fn download_file_name(asset: &str) -> String {
+    let pid = std::process::id();
     if cfg!(windows) {
-        format!("{asset}.download.exe")
+        format!("mtrim-{pid}-{asset}.download.exe")
     } else {
-        format!("{asset}.download")
+        format!("mtrim-{pid}-{asset}.download")
     }
 }
 
@@ -242,8 +246,10 @@ ccc  mtrim-linux-x86_64
     }
 
     #[test]
-    fn download_name_keeps_extension_on_windows() {
+    fn download_name_is_process_scoped_and_keeps_extension() {
         let name = download_file_name("mtrim-win-x86_64.exe");
+        assert!(name.contains(&std::process::id().to_string()), "{name}");
+        assert!(name.contains("mtrim-win-x86_64.exe"), "{name}");
         if cfg!(windows) {
             assert!(name.ends_with(".exe"), "{name}");
         } else {
