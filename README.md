@@ -27,6 +27,8 @@ apps/ios/  apps/android/  rust/  assets/
 
 ### Windows（PowerShell 5.1 / 7）
 
+默认安装最新版：
+
 ```powershell
 irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
 ```
@@ -39,10 +41,15 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 
 ### macOS / Linux
 
+默认安装最新版：
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
+```
 
-# 指定版本
+指定版本：
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.3
 ```
 
