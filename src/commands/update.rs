@@ -7,6 +7,7 @@ use crate::Result;
 use crate::config::{Project, current_version};
 use crate::update::{Fetcher, Replacer};
 use crate::version;
+use std::fs;
 
 pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) -> Result<()> {
     let mut effective = current_version().to_string();
@@ -26,7 +27,11 @@ pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) ->
             effective = fetched.version;
             acted = true;
         }
-        Ok(_) => cli_checked = true,
+        Ok(fetched) => {
+            // 已是最新版：丢弃下载的临时产物
+            let _ = fs::remove_file(&fetched.binary);
+            cli_checked = true;
+        }
         Err(e) => println!("⚠️  检查系统 CLI 更新失败：{e}"),
     }
 

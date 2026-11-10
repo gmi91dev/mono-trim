@@ -120,10 +120,11 @@ $ mtrim show
   - 项目版本更高 → `建议升级系统 CLI`
   - 项目版本更低 → `可运行 mtrim update 同步`
 - `mtrim update` 的行为：
-  1. 检查是否有新版 CLI，有则下载校验后替换自身；
+  1. 检查是否有新版 CLI：下载 `sha256sums.txt` 校验产物后再替换自身（校验失败不会改动现有文件）；
   2. 若当前目录已初始化且项目版本落后，用内置默认值重写系统配置并写入新版本；
   3. 两者都不需要 → 输出"已是最新"，不写任何文件。
 - 配置字段只增不删，所以从旧版本升级到新版本**不需要迁移、备份或重置用户配置**。
+- 内网/镜像环境：安装脚本与 `mtrim update` 都支持 `MONO_TRIM_MIRROR` 指定下载源。
 
 ---
 
@@ -222,6 +223,7 @@ cargo test --all-targets
 | 单元测试 | `src/**` | 配置合并、规则生成、路径校验、版本比较、doctor 结论 |
 | 契约测试 | `tests/cli.rs` | 帮助、版本、退出码、各命令端到端行为 |
 | 端到端测试 | `tests/git_sparse.rs` | 真实 Git 下黑白名单与 `applyall` 的文件结果 |
+| 自更新测试 | `tests/update.rs` | 本地 HTTP 服务器模拟 Release：下载、sha256 校验、校验失败与下载失败 |
 | 快照测试 | `tests/golden.rs` | 帮助输出、生成的配置、`doc` 表格、`ls` 输出 |
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。

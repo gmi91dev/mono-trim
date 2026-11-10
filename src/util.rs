@@ -1,9 +1,22 @@
 //! 文件与集合相关的小工具。
 
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
 use crate::Result;
+
+/// 计算文件的 sha256（小写十六进制）
+pub fn sha256_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
 
 pub fn write_file(path: &Path, content: &str) -> Result<()> {
     fs::write(path, content).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
@@ -44,6 +57,22 @@ mod tests {
         let dir = TempDir::new("util-write-err");
         let err = write_file(&dir.path().join("missing/child.txt"), "x").unwrap_err();
         assert!(err.contains("写入"), "错误信息应说明写入失败：{err}");
+    }
+
+    #[test]
+    fn sha256_matches_known_vector() {
+        let dir = TempDir::new("util-sha256");
+        let path = dir.path().join("abc.txt");
+        write_file(&path, "abc").unwrap();
+        assert_eq!(
+            sha256_file(&path).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn sha256_reports_missing_file() {
+        assert!(sha256_file(Path::new("does-not-exist")).is_err());
     }
 
     #[cfg(unix)]
