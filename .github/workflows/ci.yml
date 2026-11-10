@@ -48,7 +48,7 @@ jobs:
           ./scripts/install.ps1 -DryRun -Dir "$env:RUNNER_TEMP\mtrim" -NoPath
           cmd /c "scripts\install.cmd -DryRun -NoPath -Dir %RUNNER_TEMP%\mtrim-cmd"
 
-      - name: Smoke test install.sh (macOS: sh/bash/zsh)
+      - name: Smoke test install.sh (macOS sh/bash/zsh)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
           bash scripts/install.sh --dry-run
           zsh scripts/install.sh --dry-run
 
-      - name: Smoke test install.sh (Linux: sh/bash)
+      - name: Smoke test install.sh (Linux sh/bash)
         if: runner.os == 'Linux'
         shell: bash
         run: |
