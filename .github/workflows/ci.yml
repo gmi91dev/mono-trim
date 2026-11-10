@@ -53,6 +53,7 @@ jobs:
         shell: bash
         run: |
           sh -n scripts/install.sh && bash -n scripts/install.sh && zsh -n scripts/install.sh
+          sh -n scripts/e2e-install.sh
           sh scripts/install.sh --dry-run
           bash scripts/install.sh --dry-run
           zsh scripts/install.sh --dry-run
@@ -62,6 +63,7 @@ jobs:
         shell: bash
         run: |
           sh -n scripts/install.sh && bash -n scripts/install.sh
+          sh -n scripts/e2e-install.sh
           sh scripts/install.sh --dry-run
           bash scripts/install.sh --dry-run
 
@@ -70,3 +72,18 @@ jobs:
 
       - name: Build (release)
         run: cargo build --release
+
+      - name: Installer end-to-end (sh/bash)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/e2e-install.sh sh bash
+
+      - name: Installer end-to-end (sh/bash/zsh)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/e2e-install.sh sh bash zsh
+
+      - name: Installer end-to-end (cmd + PowerShell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/e2e-install.ps1
