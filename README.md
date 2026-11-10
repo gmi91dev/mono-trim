@@ -23,7 +23,7 @@ apps/ios/  apps/android/  rust/  assets/
 
 ## 安装
 
-三种平台都是一行命令，脚本会校验 `sha256`、安装到用户目录并提示 PATH。
+安装只需要一行命令：Windows 用 PowerShell，macOS / Linux 用 sh。脚本会校验 `sha256`、安装到用户目录并提示 PATH。
 
 ### Windows（PowerShell 5.1 / 7）
 
@@ -34,13 +34,7 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 指定版本或目录（`iex` 无法传参，改用脚本块）：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.2 -Dir D:\tools\mono-trim
-```
-
-### Windows（cmd.exe）
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.3 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -49,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
 
 # 指定版本
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.2
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.3
 ```
 
 ### 安装脚本参数
@@ -74,7 +68,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.2
+./mono-trim/scripts/install.sh --version 0.0.3
 ```
 
 ### 从源码
@@ -84,6 +78,25 @@ cargo install --path .
 # 或
 cargo install --git https://github.com/gmi91dev/mono-trim.git
 ```
+
+### 卸载
+
+```powershell
+# Windows：删除程序，并把安装目录从用户 PATH 移除
+irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/uninstall.ps1 | iex
+```
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/uninstall.sh | bash
+```
+
+手动方式：
+
+- Windows：删除 `%LOCALAPPDATA%\Programs\mono-trim`，再从用户 PATH 中移除该目录
+- macOS / Linux：删除 `~/.local/bin/mtrim`，并删掉 shell 配置里对应的 PATH 行
+
+卸载**不会**动项目里的 `.mono-trim/config.toml` 与 `mono-trim.toml`（它们是项目数据）。
 
 ## 快速开始
 
@@ -165,7 +178,7 @@ cargo test --all-targets
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。
 
-发布：修改 `Cargo.toml` 版本 → `git tag v0.0.2 && git push origin v0.0.2`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
+发布：修改 `Cargo.toml` 版本 → `git tag v0.0.3 && git push origin v0.0.3`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
 
 ## License
 

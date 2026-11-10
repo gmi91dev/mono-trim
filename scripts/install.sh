@@ -39,7 +39,7 @@ REPO="${REPO%/}"
 case "$(uname -s)" in
     Darwin) OS="macos" ;;
     Linux)  OS="linux" ;;
-    *) echo "❌ 不支持的平台：$(uname -s)（Windows 请使用 scripts/install.ps1 或 scripts/install.cmd）" >&2; exit 1 ;;
+    *) echo "❌ 不支持的平台：$(uname -s)（Windows 请使用 scripts/install.ps1）" >&2; exit 1 ;;
 esac
 
 case "$(uname -m)" in

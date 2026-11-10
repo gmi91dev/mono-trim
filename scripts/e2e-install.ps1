@@ -3,7 +3,7 @@
   安装脚本端到端自测（Windows）
 
 .DESCRIPTION
-  用本地 HTTP 服务器模拟 Release，验证 install.cmd → install.ps1 的完整流程：
+  用本地 HTTP 服务器模拟 Release，验证 install.ps1 → uninstall.ps1 的完整流程：
   下载 → sha256 校验 → 安装 → 版本正确
 
   依赖：python（提供静态 HTTP 服务）、已构建的 target/release/mtrim.exe
@@ -62,8 +62,8 @@ try {
     $env:MONO_TRIM_MIRROR = $Base
     $BinDir = Join-Path $Root "bin"
 
-    Write-Host "-> 使用 cmd 包装器安装"
-    & "$PSScriptRoot\install.cmd" -Dir $BinDir -NoPath -Force
+    Write-Host "-> 使用 PowerShell 安装"
+    & "$PSScriptRoot\install.ps1" -Dir $BinDir -NoPath -Force
 
     $Actual = (& (Join-Path $BinDir "mtrim.exe") --version).Trim()
     $Version = (Select-String -Path "Cargo.toml" -Pattern '^version' | Select-Object -First 1).Line.Split('"')[1]
@@ -71,6 +71,13 @@ try {
         throw "版本不符：期望 mtrim $Version，实际 $Actual"
     }
     Write-Host "[OK] 安装流程通过（$Actual）"
+
+    Write-Host "-> 执行卸载"
+    & "$PSScriptRoot\uninstall.ps1" -Dir $BinDir -KeepPath | Out-Null
+    if (Test-Path (Join-Path $BinDir "mtrim.exe")) {
+        throw "卸载后仍存在 mtrim.exe"
+    }
+    Write-Host "[OK] 卸载流程通过"
 }
 finally {
     Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue

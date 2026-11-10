@@ -130,7 +130,7 @@ $ mtrim show
 
 ## 📦 安装
 
-三个平台都是一行命令：脚本会从 GitHub Release 下载当前平台产物、校验 sha256、安装到用户目录并提示 PATH。
+安装只需要一行命令：Windows 用 PowerShell，macOS / Linux 用 sh。脚本会从 GitHub Release 下载当前平台产物、校验 sha256、安装到用户目录并提示 PATH。
 
 ### Windows（PowerShell 5.1 / 7）
 
@@ -138,13 +138,7 @@ $ mtrim show
 irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
 
 # 指定版本 / 目录（iex 无法传参，用脚本块）
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.2 -Dir D:\tools\mono-trim
-```
-
-### Windows（cmd.exe）
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.3 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -153,7 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
 
 # 指定版本
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.2
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.3
 ```
 
 ### 参数
@@ -178,7 +172,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.2
+./mono-trim/scripts/install.sh --version 0.0.3
 ```
 
 ### 从源码
@@ -187,6 +181,21 @@ git clone https://github.com/gmi91dev/mono-trim.git
 cargo install --path .
 cargo install --git https://github.com/gmi91dev/mono-trim.git
 ```
+
+### 卸载
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/uninstall.ps1 | iex
+```
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/uninstall.sh | bash
+```
+
+脚本会删除可执行文件并（Windows 上）把安装目录从用户 PATH 移除；目录为空时一并删除。
+项目配置文件 `.mono-trim/config.toml`、`mono-trim.toml` 不会被删除。
 
 ### 新设备上手
 
@@ -205,7 +214,7 @@ mtrim win-dev
 ### 发布（维护者）
 
 1. 修改 `Cargo.toml` 的 `version`；
-2. `git tag v0.0.2 && git push origin v0.0.2`；
+2. `git tag v0.0.3 && git push origin v0.0.3`；
 3. `.github/workflows/release.yml` 构建四个平台产物并附 `sha256sums.txt`。
 
 ## 🧪 开发与测试

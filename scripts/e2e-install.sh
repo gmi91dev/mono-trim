@@ -85,4 +85,12 @@ for SHELL_BIN in $SHELLS; do
         exit 1
     fi
     echo "✅ ${SHELL_BIN} 安装流程通过"
+
+    echo "→ 使用 ${SHELL_BIN} 执行卸载"
+    "$SHELL_BIN" scripts/uninstall.sh --dir "$TARGET_DIR" >/dev/null
+    if [ -e "${TARGET_DIR}/mtrim" ]; then
+        echo "❌ 卸载后仍存在 ${TARGET_DIR}/mtrim" >&2
+        exit 1
+    fi
+    echo "✅ ${SHELL_BIN} 卸载流程通过"
 done
