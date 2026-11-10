@@ -17,7 +17,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     let config = config::read_config(config_path)?;
     let relative_target = config.doc_target.as_deref().unwrap_or(DEFAULT_DOC_TARGET);
     // doc_target 相对配置文件所在目录（即 .mono-trim/）解析，"../README.md" 才指向项目根
-    let tool_dir = config_path.parent().unwrap_or(Path::new("."));
+    let tool_dir = config::tool_dir_of(config_path);
     let target_path = tool_dir.join(relative_target);
     let block = render_block(&config);
 
@@ -121,5 +121,82 @@ mod tests {
     #[test]
     fn escapes_pipes_for_markdown_table() {
         assert_eq!(escape_cell("a | b\nc"), "a \\| b c");
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+    use crate::test_support::{TempDir, write_config};
+
+    fn config_from(body: &str) -> Config {
+        toml::from_str(body).unwrap()
+    }
+
+    #[test]
+    fn render_block_sorts_profiles_and_escapes_cells() {
+        let config = config_from(
+            r#"[profiles.zeta]
+mode = "white"
+desc = "含 | 管道符"
+targets = []
+
+[profiles.alpha]
+mode = "black"
+desc = "普通说明"
+targets = []
+"#,
+        );
+
+        let block = render_block(&config);
+        assert!(block.starts_with(DOC_BEGIN));
+        assert!(block.ends_with(DOC_END));
+        assert!(block.contains(r"含 \| 管道符"), "表格内管道符需转义");
+        assert!(block.contains(&format!("./{TOOL_DIR}/mtrim reset")));
+
+        let alpha = block.find("mtrim alpha").unwrap();
+        let zeta = block.find("mtrim zeta").unwrap();
+        assert!(alpha < zeta, "命令应按名称排序输出");
+    }
+
+    #[test]
+    fn run_writes_document_relative_to_tool_dir_and_is_idempotent() {
+        let dir = TempDir::new("doc-run");
+        let config_path = write_config(
+            &dir,
+            r#"doc_target = "../README.md"
+
+[profiles.win-dev]
+mode = "black"
+desc = "隐藏 iOS 壳"
+targets = ["apps/ios/"]
+"#,
+        );
+        dir.write("README.md", "# 项目说明\n");
+
+        run(&config_path).unwrap();
+        let first = dir.read("README.md");
+        assert!(first.starts_with("# 项目说明"), "应保留原有内容");
+        assert_eq!(first.matches(DOC_BEGIN).count(), 1);
+
+        run(&config_path).unwrap();
+        assert_eq!(dir.read("README.md"), first, "重复执行不应产生重复区块");
+    }
+
+    #[test]
+    fn run_creates_missing_document() {
+        let dir = TempDir::new("doc-create");
+        let config_path = write_config(
+            &dir,
+            r#"doc_target = "../docs/commands.md"
+"#,
+        );
+
+        run(&config_path).unwrap();
+
+        let doc = dir.read("docs/commands.md");
+        assert!(doc.contains(DOC_BEGIN));
+        assert!(doc.contains("mtrim reset"));
+        assert!(dir.exists("docs/commands.md"));
     }
 }

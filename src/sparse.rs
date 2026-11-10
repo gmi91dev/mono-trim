@@ -1,19 +1,43 @@
 //! 稀疏检出规则生成：把 profile 翻译成 sparse-checkout 非 cone 模式规则，
 //! 并对用户填写的目标路径做安全校验。
+//!
+//! 这里只做纯计算，不写文件、不打印日志，便于单元测试。
 
 use crate::Result;
 use crate::config::{Profile, TOOL_DIR};
 
-/// 生成 sparse-checkout 规则文本（非 cone 模式）
-pub fn build_patterns(profile: &Profile) -> Result<String> {
-    let mut lines: Vec<String> = vec!["/*".to_string()];
+/// 全量放行规则（黑名单首行 / reset 回退共用）
+pub const INCLUDE_ALL: &str = "/*";
+
+/// 一次裁剪的完整执行计划
+#[derive(Debug, PartialEq, Eq)]
+pub struct SparsePlan {
+    /// 待写入 sparse-checkout 文件的规则文本
+    pub patterns: String,
+    /// 面向用户的逐条动作说明（保留用户在配置中填写的原始写法）
+    pub actions: Vec<Action>,
+}
+
+/// 单条目标路径的处理动作
+#[derive(Debug, PartialEq, Eq)]
+pub enum Action {
+    /// 黑名单：物理排除
+    Exclude(String),
+    /// 白名单：仅保留
+    Keep(String),
+}
+
+/// 生成稀疏检出计划
+pub fn build_plan(profile: &Profile) -> Result<SparsePlan> {
+    let mut lines: Vec<String> = vec![INCLUDE_ALL.to_string()];
+    let mut actions = Vec::new();
 
     match profile.mode.as_str() {
         // 黑名单：全量放行，再逐项物理挖除
         "black" => {
             for target in &profile.targets {
                 let path = normalize_target(target)?;
-                println!("   🚫 [黑名单排除] -> {target}");
+                actions.push(Action::Exclude(target.clone()));
                 lines.push(format!("!{path}"));
             }
         }
@@ -23,7 +47,7 @@ pub fn build_patterns(profile: &Profile) -> Result<String> {
             lines.push(format!("/{TOOL_DIR}/"));
             for target in &profile.targets {
                 let path = normalize_target(target)?;
-                println!("   ✅ [白名单仅保留] -> {target}");
+                actions.push(Action::Keep(target.clone()));
                 lines.extend(white_patterns(&path));
             }
         }
@@ -34,7 +58,10 @@ pub fn build_patterns(profile: &Profile) -> Result<String> {
         }
     }
 
-    Ok(format!("{}\n", lines.join("\n")))
+    Ok(SparsePlan {
+        patterns: format!("{}\n", lines.join("\n")),
+        actions,
+    })
 }
 
 /// 白名单模式下单条路径的放行规则：
@@ -135,25 +162,56 @@ mod tests {
     }
 
     #[test]
+    fn accepts_dot_prefixed_targets_but_not_empty_segments() {
+        assert_eq!(normalize_target("./apps/ios/").unwrap(), "/apps/ios/");
+        assert!(normalize_target("apps//ios").is_err());
+        assert!(normalize_target("./").is_err());
+    }
+
+    #[test]
     fn black_mode_keeps_root_and_excludes_targets() {
-        let patterns = build_patterns(&profile("black", &["apps/ios/", "assets/a.mp4"])).unwrap();
-        assert_eq!(patterns, "/*\n!/apps/ios/\n!/assets/a.mp4\n");
+        let plan = build_plan(&profile("black", &["apps/ios/", "assets/a.mp4"])).unwrap();
+
+        assert_eq!(plan.patterns, "/*\n!/apps/ios/\n!/assets/a.mp4\n");
+        assert_eq!(
+            plan.actions,
+            [
+                Action::Exclude("apps/ios/".into()),
+                Action::Exclude("assets/a.mp4".into())
+            ]
+        );
     }
 
     #[test]
     fn white_mode_whitelists_parents_but_hides_siblings() {
-        let patterns = build_patterns(&profile("white", &["apps/ios/"])).unwrap();
+        let plan = build_plan(&profile("white", &["apps/ios/"])).unwrap();
         assert_eq!(
-            patterns,
+            plan.patterns,
             format!("/*\n!/*/\n/{TOOL_DIR}/\n/apps/\n!/apps/*\n/apps/ios/\n")
         );
 
-        let patterns = build_patterns(&profile("white", &["rust/src/main.rs"])).unwrap();
-        assert!(patterns.contains("/rust/\n!/rust/*\n/rust/src/\n!/rust/src/*\n/rust/src/main.rs"));
+        let plan = build_plan(&profile("white", &["rust/src/main.rs"])).unwrap();
+        assert!(
+            plan.patterns
+                .contains("/rust/\n!/rust/*\n/rust/src/\n!/rust/src/*\n/rust/src/main.rs")
+        );
+    }
+
+    #[test]
+    fn white_mode_always_protects_tool_dir() {
+        let plan = build_plan(&profile("white", &[])).unwrap();
+        assert_eq!(plan.patterns, format!("/*\n!/*/\n/{TOOL_DIR}/\n"));
+        assert!(plan.patterns.ends_with('\n'), "规则文件应以换行结尾");
+    }
+
+    #[test]
+    fn black_mode_rejects_unsafe_targets() {
+        let err = build_plan(&profile("black", &[".git/config"])).unwrap_err();
+        assert!(err.contains(".git"), "{err}");
     }
 
     #[test]
     fn rejects_unknown_mode() {
-        assert!(build_patterns(&profile("gray", &[])).is_err());
+        assert!(build_plan(&profile("gray", &[])).is_err());
     }
 }

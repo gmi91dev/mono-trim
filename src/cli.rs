@@ -123,3 +123,40 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn command_name_is_mtrim() {
+        assert_eq!(COMMAND, "mtrim");
+        assert_eq!(build().get_name(), COMMAND);
+    }
+
+    #[test]
+    fn platforms_are_validated_by_clap() {
+        assert!(
+            build()
+                .try_get_matches_from(["mtrim", "init", "-p", "win", "linux"])
+                .is_ok()
+        );
+        assert!(
+            build()
+                .try_get_matches_from(["mtrim", "init", "-p", "android"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reserved_list_includes_auto_help() {
+        let reserved: Vec<&str> = reserved_commands().collect();
+
+        assert_eq!(reserved.len(), BUILTIN_COMMANDS.len() + 1);
+        assert!(reserved.contains(&AUTO_COMMAND));
+        for name in BUILTIN_COMMANDS {
+            assert!(is_reserved(name), "{name} 应为保留命令");
+        }
+        assert!(!is_reserved("win-dev"));
+    }
+}

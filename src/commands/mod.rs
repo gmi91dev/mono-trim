@@ -15,15 +15,16 @@ pub fn dispatch(matches: ArgMatches) -> Result<()> {
         return init::run(sub_matches);
     }
 
-    git::ensure_repo()?;
-    let config_path = config::path();
+    let git = git::SystemGit;
+    git::ensure_repo(&git)?;
+    let config_path = config::path(&git);
 
     match matches.subcommand() {
-        Some(("reapply", _)) => apply::reapply(),
+        Some(("reapply", _)) => apply::reapply(&git),
         Some(("doc", _)) => doc::run(&config_path),
         Some(("doctor", _)) => doctor::run(&config_path),
-        Some(("reset", _)) => apply::reset(),
-        Some((name, _)) => apply::profile(&config_path, name),
+        Some(("reset", _)) => apply::reset(&git),
+        Some((name, _)) => apply::profile(&config_path, name, &git),
         None => Err("未指定具体操作！输入 --help 查看可用命令。".into()),
     }
 }

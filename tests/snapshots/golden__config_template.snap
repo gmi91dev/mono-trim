@@ -1,0 +1,23 @@
+---
+source: tests/golden.rs
+expression: "dir.read(\".mono-trim/config.toml\")"
+---
+# =====================================================================
+#                 mono-trim 工作空间裁剪引擎配置文件
+# =====================================================================
+
+# ✅ 重要：每次修改本文件后，请务必先运行一次 `mtrim doctor` 校验配置，
+#    确认无❌错误后再执行自定义裁剪命令，避免非法配置破坏工作空间。
+
+doc_target = "../README.md"
+
+# ⛔ 系统保留命令（内置命令，禁止用作 profiles 名称，否则永远无法触发）：
+#   init / reapply / doc / doctor / reset / help
+
+# 🛠️ 语法结构模板：
+#   [profiles.你的自定义子命令名称]
+#   mode = "black" 或 "white"
+#   desc = "关于这个自定义命令的作用描述"
+#   targets = [ "apps/ios/", "assets/large_video.mp4" ]
+
+# ⚠️ 保护规则：`/`（项目根）、`.git/`、`.mono-trim/` 永远不可被裁剪。

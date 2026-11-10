@@ -1,0 +1,18 @@
+---
+source: tests/golden.rs
+expression: stdout(&output)
+---
+高内聚、零污染的项目级多平台工作空间裁剪引擎
+
+Usage: mtrim [COMMAND]
+
+Commands:
+  init     在当前项目下初始化环境
+  reapply  根据当前的 Git 稀疏设置重新刷新本地物理硬盘
+  doc      将自定义命令及说明自动导入到指定的文档中
+  doctor   检查配置文件合法性及路径有效性
+  reset    恢复项目 100% 全量目录与文件
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

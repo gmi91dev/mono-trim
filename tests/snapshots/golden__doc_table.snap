@@ -1,0 +1,15 @@
+---
+source: tests/golden.rs
+expression: "dir.read(\"README.md\")"
+---
+# 项目说明
+
+<!-- mono-trim:begin -->
+## 🛠️ 项目工作空间裁剪命令
+
+| 命令 | 模式 | 功能说明 |
+| :--- | :--- | :--- |
+| `./.mono-trim/mtrim rust-only` | `white` | 仅保留 Rust 核心层 |
+| `./.mono-trim/mtrim win-dev` | `black` | 隐藏 iOS 壳与大资产 |
+| `./.mono-trim/mtrim reset` | `全量` | 恢复完整工作空间 |
+<!-- mono-trim:end -->

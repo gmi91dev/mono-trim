@@ -13,6 +13,8 @@ mod commands;
 mod config;
 mod git;
 mod sparse;
+#[cfg(test)]
+mod test_support;
 mod util;
 
 /// 全项目统一错误类型：错误信息即面向用户的最终提示。

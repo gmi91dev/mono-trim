@@ -32,7 +32,9 @@ my-multiplatform-project/
 
 ## ⚙️ 配置文件规范说明 (`.mono-trim/config.toml`)
 
-`init` 命令会为您生成一份纯净的空白考卷。**每次编辑完该文件后，都建议立刻运行一次 `mtrim doctor` 做自检**，确认无误再执行裁剪命令；`doctor` 会拦截语法错误、非法 `mode`、危险路径与无法被调用的 `profiles` 名称。您可以根据项目结构在其中声明具体的裁剪行为：
+`init` 命令会为您生成一份纯净的空白考卷。**每次编辑完该文件后，都建议立刻运行一次 `mtrim doctor` 做自检**，确认无误再执行裁剪命令；`doctor` 会拦截语法错误、非法 `mode`、危险路径与无法被调用的 `profiles` 名称。
+
+模板内容如下（以 `mtrim init` 实际生成的内容为准）：
 
 ```toml
 # =====================================================================
@@ -40,47 +42,44 @@ my-multiplatform-project/
 # =====================================================================
 
 # ✅ 重要：每次修改本文件后，请务必先运行一次 `mtrim doctor` 校验配置，
-#    确认无 ❌ 错误后再执行自定义裁剪命令，避免非法配置破坏工作空间。
+#    确认无❌错误后再执行自定义裁剪命令，避免非法配置破坏工作空间。
 
-# 1. 自动生成说明文档的目标文件路径
-# 说明：必须使用相对路径 "../" 回退到项目根目录。
 doc_target = "../README.md"
 
-# 2. 系统保留命令（内置命令，禁止用作 profiles 名称，否则永远不会被执行）
+# ⛔ 系统保留命令（内置命令，禁止用作 profiles 名称，否则永远无法触发）：
 #   init / reapply / doc / doctor / reset / help
 
-# 3. 用户自定义命令与黑白名单配置说明 (profiles)
-# 
 # 🛠️ 语法结构模板：
 #   [profiles.你的自定义子命令名称]
 #   mode = "black" 或 "white"
-#   desc = "关于这个自定义命令的作用描述（运行 doc 命令时会自动导出到文档中）"
-#   targets = [ "需要裁剪的路径A", "需要裁剪的路径B" ]
-#
-# ⚙️ 参数详解：
-#   - mode = "black" ：黑名单模式。默认保留所有内容，仅物理排除 targets 里的项。
-#   - mode = "white" ：白名单模式。默认隐藏所有内容，【仅保留】targets 里的项。
-#   - targets 路径规则：
-#     * 目录：必须以 "/" 结尾（例如 "apps/ios/"）。
-#     * 单文件：绝对不能以 "/" 结尾（例如 "assets/large_video.mp4"）。
+#   desc = "关于这个自定义命令的作用描述"
+#   targets = [ "apps/ios/", "assets/large_video.mp4" ]
 
-# 💡 用户配置示例：
+# ⚠️ 保护规则：`/`（项目根）、`.git/`、`.mono-trim/` 永远不可被裁剪。
+```
+
+### 字段含义
+
+| 字段 | 说明 |
+| :--- | :--- |
+| `doc_target` | `doc` 命令注入速查表的目标文件。**相对 `.mono-trim/` 解析**，`"../README.md"` 即项目根 README。 |
+| `[profiles.<名称>]` | 自定义子命令名，配置后即为 `mtrim <名称>`。不可与内置保留命令同名，不可含空白字符。 |
+| `mode` | `"black"`：默认保留全部，仅物理排除 `targets`；`"white"`：默认隐藏全部，仅保留 `targets`（根目录文件与 `.mono-trim/` 始终保留）。 |
+| `desc` | 命令说明，`doc` 命令会将其导出到 Markdown 速查表。 |
+| `targets` | 相对项目根目录的路径。目录必须以 `/` 结尾（`"apps/ios/"`），单文件不能以 `/` 结尾（`"assets/large_video.mp4"`）。`/`、`.git/`、`.mono-trim/` 永远不可裁剪。 |
+
+### 配置示例
+
+```toml
 [profiles.win-dev]
 mode = "black"
 desc = "Windows 端 Android 开发环境：隐藏 iOS 原生壳和部分大资产文件"
-targets = [
-    "apps/ios/",
-    "assets/large_video.mp4"
-]
+targets = ["apps/ios/", "assets/large_video.mp4"]
 
 [profiles.rust-only]
 mode = "white"
-desc = "纯底层纯净模式：【仅白名单】检出 Rust 核心层和公共配置，不加载任何 UI 壳"
-targets = [
-    "rust/",
-    "Makefile",
-    "Cargo.toml"
-]
+desc = "纯底层纯净模式：仅检出 Rust 核心层和公共配置，不加载任何 UI 壳"
+targets = ["rust/", "Makefile", "Cargo.toml"]
 ```
 
 ---

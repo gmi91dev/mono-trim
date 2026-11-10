@@ -1,1 +1,4 @@
 /target
+
+# insta 快照的临时文件
+*.snap.new
