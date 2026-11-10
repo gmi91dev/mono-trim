@@ -56,17 +56,30 @@ function Get-Sha256([string]$Path) {
 }
 
 function Download-File([string]$Url, [string]$OutFile) {
+    $Errors = @()
+
     # Prefer curl.exe: Invoke-WebRequest may fail on some TLS / proxy setups
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-        & curl.exe -fsSL --retry 2 -o $OutFile $Url
+        $Out = & curl.exe -fsSL --retry 3 --retry-all-errors -o $OutFile $Url 2>&1
         if ($LASTEXITCODE -eq 0) { return }
+        $Errors += ($Out | Out-String).Trim()
     }
     if (Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue) {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
+            return
+        }
+        catch { $Errors += $_.Exception.Message }
+    }
+    $Client = New-Object System.Net.WebClient
+    try {
+        $Client.DownloadFile($Url, $OutFile)
         return
     }
-    $client = New-Object System.Net.WebClient
-    try { $client.DownloadFile($Url, $OutFile) } finally { $client.Dispose() }
+    catch { $Errors += $_.Exception.Message }
+    finally { $Client.Dispose() }
+
+    throw "download failed: $Url`n" + ($Errors -join "`n")
 }
 
 $Repo = if ($env:MONO_TRIM_MIRROR) { $env:MONO_TRIM_MIRROR.TrimEnd('/') } else { "https://github.com/gmi91dev/mono-trim" }
@@ -99,7 +112,6 @@ if ($DryRun) {
     return
 }
 
-New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 $Temp = Join-Path ([System.IO.Path]::GetTempPath()) ("mtrim-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $Temp | Out-Null
 
@@ -138,6 +150,8 @@ try {
         Write-Host "[OK] already up to date ($NewVersion)"
         return
     }
+
+    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 
     # A running exe cannot be overwritten: rename the old file first
     if (Test-Path $Target) {

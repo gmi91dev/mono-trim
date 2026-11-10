@@ -80,8 +80,15 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' 0
 
 echo "→ 下载中..."
-curl -fsSL --retry 2 -o "${TMP}/${ASSET}" "${BASE}/${ASSET}"
-curl -fsSL --retry 2 -o "${TMP}/sha256sums.txt" "${BASE}/sha256sums.txt"
+download() {
+    # 重试过程中的 curl 噪声不输出，最终失败才报错
+    curl -fsSL --retry 3 --retry-all-errors -o "$2" "$1" 2>/dev/null || {
+        echo "❌ 下载失败：$1" >&2
+        exit 1
+    }
+}
+download "${BASE}/${ASSET}" "${TMP}/${ASSET}"
+download "${BASE}/sha256sums.txt" "${TMP}/sha256sums.txt"
 
 # 兼容 `hash  file`、`hash *file` 与 `hash ./file` 三种格式
 EXPECTED="$(awk -v name="$ASSET" '{ f=$NF; gsub(/^(\*|\.\/)/, "", f); if (f == name) { print $1; exit } }' "${TMP}/sha256sums.txt")"
