@@ -23,30 +23,59 @@ apps/ios/  apps/android/  rust/  assets/
 
 ## 安装
 
-### Windows
+三种平台都是一行命令，脚本会校验 `sha256`、安装到用户目录并提示 PATH。
 
-```bat
-:: cmd.exe（自动选择 pwsh 或 Windows PowerShell）
-git clone https://github.com/gmi91dev/mono-trim.git
-mono-trim\scripts\install.cmd
-```
+### Windows（PowerShell 5.1 / 7）
 
 ```powershell
-# PowerShell 5.1 / 7
-.\mono-trim\scripts\install.ps1
-# 指定版本与目录
-.\mono-trim\scripts\install.ps1 -Version 0.0.2 -Dir D:\tools\mono-trim
+irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
+```
+
+指定版本或目录（`iex` 无法传参，改用脚本块）：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.2 -Dir D:\tools\mono-trim
+```
+
+### Windows（cmd.exe）
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex"
 ```
 
 ### macOS / Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
+
 # 指定版本
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.2
 ```
 
-脚本会校验 `sha256`、安装到用户目录并提示 PATH。支持 `--force`（同版本重装）、`--dry-run`（只看动作）、`MONO_TRIM_MIRROR`（内网镜像）。
+### 安装脚本参数
+
+| 参数 | 说明 |
+| :--- | :--- |
+| `--version` / `-Version` | 指定版本，默认 `latest` |
+| `--dir` / `-Dir` | 安装目录（默认 `~/.local/bin` 或 `%LOCALAPPDATA%\Programs\mono-trim`） |
+| `--force` / `-Force` | 同版本也重新安装 |
+| `--dry-run` / `-DryRun` | 只打印将要执行的动作 |
+
+环境变量 `MONO_TRIM_MIRROR` 可替换下载源（内网镜像）。
+
+### 网络受限 / 想先审查脚本
+
+```powershell
+# PowerShell：先下载再执行
+curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1
+& "$env:TEMP\mtrim-install.ps1"
+```
+
+```bash
+# macOS / Linux：clone 后运行仓库内脚本
+git clone https://github.com/gmi91dev/mono-trim.git
+./mono-trim/scripts/install.sh --version 0.0.2
+```
 
 ### 从源码
 

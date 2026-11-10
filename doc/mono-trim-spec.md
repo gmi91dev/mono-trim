@@ -130,53 +130,61 @@ $ mtrim show
 
 ## 📦 安装
 
-`mtrim` 只装在开发者的机器上，项目里不需要安装任何东西。
+三个平台都是一行命令：脚本会从 GitHub Release 下载当前平台产物、校验 sha256、安装到用户目录并提示 PATH。
 
-### 方式一：安装脚本（推荐）
-
-脚本会从 GitHub Release 下载当前平台产物、校验 sha256、安装到用户目录并加入 PATH。
-
-**Windows（PowerShell）**
+### Windows（PowerShell 5.1 / 7）
 
 ```powershell
-# 直接运行仓库内的脚本
-git clone https://github.com/gmi91dev/mono-trim.git
-.\mono-trim\scripts\install.ps1
+irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
 
-# 安装指定版本 / 自定义目录
-.\scripts\install.ps1 -Version 0.0.2 -Dir D:\tools\mtrim
-
-# PowerShell 7 同样可用（兼容 Windows PowerShell 5.1 与 pwsh 7+，非 Windows 的 pwsh 请改用 install.sh）
-pwsh -File scripts\install.ps1 -DryRun
+# 指定版本 / 目录（iex 无法传参，用脚本块）
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.2 -Dir D:\tools\mono-trim
 ```
 
-**Windows（cmd.exe）**
+### Windows（cmd.exe）
 
 ```bat
-:: cmd 包装器会自动选择 pwsh 或 Windows PowerShell
-scripts\install.cmd
-
-:: 透传参数
-scripts\install.cmd -Version 0.0.2 -Dir D:	ools\mtrim
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex"
 ```
 
-**macOS / Linux**
+### macOS / Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
-# 或安装指定版本
-curl -fsSL .../scripts/install.sh | bash -s -- --version 0.0.2
+
+# 指定版本
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.2
 ```
 
-脚本参数：`--version <版本>`、`--dir <目录>`、`--force`（同版本也重装）、`--dry-run`（只打印动作）。
+### 参数
 
-支持范围：Windows 的 cmd / Windows PowerShell 5.1 / PowerShell 7+；macOS 与 Linux 的 sh / bash / zsh（脚本按 POSIX 编写）。
-环境变量 `MONO_TRIM_MIRROR` 可替换下载源（内网镜像）。
+| 参数 | 说明 |
+| :--- | :--- |
+| `--version` / `-Version` | 指定版本，默认 `latest` |
+| `--dir` / `-Dir` | 安装目录（默认 `~/.local/bin` 或 `%LOCALAPPDATA%\Programs\mono-trim`） |
+| `--force` / `-Force` | 同版本也重新安装 |
+| `--dry-run` / `-DryRun` | 只打印动作，不写文件 |
 
-### 方式二：从源码安装
+环境变量 `MONO_TRIM_MIRROR` 可替换下载源（内网镜像，安装脚本与 `mtrim update` 都支持）。
+
+### 网络受限 / 先审查脚本
+
+```powershell
+# Windows：先下载再执行
+curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1
+& "$env:TEMP\mtrim-install.ps1"
+```
 
 ```bash
-cargo install --path .        # 当前仓库
+# macOS / Linux：clone 后运行仓库内脚本
+git clone https://github.com/gmi91dev/mono-trim.git
+./mono-trim/scripts/install.sh --version 0.0.2
+```
+
+### 从源码
+
+```bash
+cargo install --path .
 cargo install --git https://github.com/gmi91dev/mono-trim.git
 ```
 
@@ -184,29 +192,21 @@ cargo install --git https://github.com/gmi91dev/mono-trim.git
 
 ```bash
 git clone <repo> && cd <repo>
-mtrim doctor        # 校验配置
-mtrim ls            # 查看可用裁剪命令
-mtrim win-dev       # 执行自定义裁剪
+mtrim doctor
+mtrim ls
+mtrim win-dev
 ```
 
 ### 升级
 
-- 系统 CLI：`mtrim update`（自动检查 Release 并替换自身），或重跑安装脚本；
-- 项目配置版本：`mtrim update` 会在项目内同步 `.mono-trim/config.toml`（无变化时不写文件）。
+- 系统 CLI：`mtrim update`（下载 `sha256sums.txt` 校验后替换自身），或重跑安装脚本；
+- 项目配置版本：`mtrim update` 会同步 `.mono-trim/config.toml`（无变化不写文件）。
 
 ### 发布（维护者）
 
 1. 修改 `Cargo.toml` 的 `version`；
-2. 打 tag 并推送：`git tag v0.0.2 && git push origin v0.1.0`；
-3. `.github/workflows/release.yml` 会构建四个产物并附上 `sha256sums.txt`：
-
-```text
-mtrim-win-x86_64.exe
-mtrim-linux-x86_64
-mtrim-macos-x86_64
-mtrim-macos-aarch64
-sha256sums.txt
-```
+2. `git tag v0.0.2 && git push origin v0.0.2`；
+3. `.github/workflows/release.yml` 构建四个平台产物并附 `sha256sums.txt`。
 
 ## 🧪 开发与测试
 
