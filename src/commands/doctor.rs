@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::Result;
 use crate::cli;
 use crate::config::{self, Config, Project, SystemConfig, UserConfig};
-use crate::sparse::normalize_target;
+use crate::sparse::{is_absolute_like, normalize_target};
 use crate::version;
 
 /// 检查项的严重级别
@@ -144,11 +144,7 @@ fn inspect_doc_target(doc_target: &str, label: &str) -> Vec<Finding> {
     if doc_target.trim().is_empty() {
         return vec![error(format!("{label} doc_target 为空。"))];
     }
-    // Windows 上 "/abs" 不算 is_absolute，这里统一按"以分隔符开头"处理
-    let absolute_like = Path::new(doc_target).is_absolute()
-        || doc_target.starts_with('/')
-        || doc_target.starts_with('\\');
-    if absolute_like {
+    if is_absolute_like(doc_target) {
         return vec![error(format!(
             "{label} doc_target '{doc_target}' 必须是相对项目根目录的路径。"
         ))];

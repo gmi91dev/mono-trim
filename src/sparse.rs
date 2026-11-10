@@ -85,6 +85,25 @@ fn white_patterns(normalized: &str) -> Vec<String> {
     patterns
 }
 
+/// 判断是否为“像绝对路径”的写法（跨平台一致）
+///
+/// 除标准库的 `is_absolute` 外，还识别 Windows 盘符（`C:/x`、`C:\x`）与 UNC（`//server/share`），
+/// 这样在 Linux/macOS 上也能拦住从 Windows 拷来的绝对路径。
+pub fn is_absolute_like(path: &str) -> bool {
+    if std::path::Path::new(path).is_absolute() {
+        return true;
+    }
+
+    let bytes = path.as_bytes();
+    let has_drive = bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || bytes[2] == b'/' || bytes[2] == b'\\');
+    let has_leading_sep = path.starts_with('/') || path.starts_with('\\');
+
+    has_drive || has_leading_sep
+}
+
 /// 规范化并校验单个裁剪目标，返回带前导 `/` 的 sparse-checkout 路径
 pub fn normalize_target(raw: &str) -> Result<String> {
     let target = raw.trim();
@@ -102,7 +121,7 @@ pub fn normalize_target(raw: &str) -> Result<String> {
             "路径 '{target}' 会命中项目根目录，请指定具体的目录或文件。"
         ));
     }
-    if std::path::Path::new(stripped).is_absolute() {
+    if is_absolute_like(stripped) {
         return Err(format!(
             "路径 '{target}' 必须是相对项目根目录的路径，不支持绝对路径。"
         ));
@@ -149,6 +168,27 @@ mod tests {
         assert_eq!(normalize_target("/apps/ios/").unwrap(), "/apps/ios/");
         assert_eq!(normalize_target("assets/a.mp4").unwrap(), "/assets/a.mp4");
         assert_eq!(normalize_target(" ./Makefile ").unwrap(), "/Makefile");
+    }
+
+    #[test]
+    fn is_absolute_like_is_cross_platform() {
+        let absolutes = [
+            "/apps",
+            "C:/apps",
+            r"C:\apps",
+            "//server/share",
+            r"\\server\share",
+        ];
+        for absolute in absolutes {
+            assert!(is_absolute_like(absolute), "'{absolute}' 应判定为绝对路径");
+        }
+
+        for relative in ["apps/ios/", "./apps", "a/b"] {
+            assert!(
+                !is_absolute_like(relative),
+                "'{relative}' 不应判定为绝对路径"
+            );
+        }
     }
 
     #[test]
