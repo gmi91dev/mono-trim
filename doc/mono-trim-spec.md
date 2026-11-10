@@ -144,7 +144,7 @@ git clone https://github.com/gmi91dev/mono-trim.git
 .\mono-trim\scripts\install.ps1
 
 # 安装指定版本 / 自定义目录
-.\scripts\install.ps1 -Version 0.0.1 -Dir D:\tools\mtrim
+.\scripts\install.ps1 -Version 0.0.2 -Dir D:\tools\mtrim
 
 # PowerShell 7 同样可用（兼容 Windows PowerShell 5.1 与 pwsh 7+，非 Windows 的 pwsh 请改用 install.sh）
 pwsh -File scripts\install.ps1 -DryRun
@@ -157,7 +157,7 @@ pwsh -File scripts\install.ps1 -DryRun
 scripts\install.cmd
 
 :: 透传参数
-scripts\install.cmd -Version 0.0.1 -Dir D:	ools\mtrim
+scripts\install.cmd -Version 0.0.2 -Dir D:	ools\mtrim
 ```
 
 **macOS / Linux**
@@ -165,7 +165,7 @@ scripts\install.cmd -Version 0.0.1 -Dir D:	ools\mtrim
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
 # 或安装指定版本
-curl -fsSL .../scripts/install.sh | bash -s -- --version 0.0.1
+curl -fsSL .../scripts/install.sh | bash -s -- --version 0.0.2
 ```
 
 脚本参数：`--version <版本>`、`--dir <目录>`、`--force`（同版本也重装）、`--dry-run`（只打印动作）。
@@ -197,7 +197,7 @@ mtrim win-dev       # 执行自定义裁剪
 ### 发布（维护者）
 
 1. 修改 `Cargo.toml` 的 `version`；
-2. 打 tag 并推送：`git tag v0.0.1 && git push origin v0.1.0`；
+2. 打 tag 并推送：`git tag v0.0.2 && git push origin v0.1.0`；
 3. `.github/workflows/release.yml` 会构建四个产物并附上 `sha256sums.txt`：
 
 ```text
