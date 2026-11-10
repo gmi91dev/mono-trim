@@ -1,6 +1,5 @@
 //! 文件与集合相关的小工具。
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -22,12 +21,6 @@ pub fn make_executable(path: &Path) {
 
 #[cfg(not(unix))]
 pub fn make_executable(_path: &Path) {}
-
-/// 原地去重（保留首次出现的顺序）
-pub fn dedupe(items: &mut Vec<String>) {
-    let mut seen = HashSet::new();
-    items.retain(|item| seen.insert(item.clone()));
-}
 
 #[cfg(test)]
 mod tests {
@@ -51,16 +44,6 @@ mod tests {
         let dir = TempDir::new("util-write-err");
         let err = write_file(&dir.path().join("missing/child.txt"), "x").unwrap_err();
         assert!(err.contains("写入"), "错误信息应说明写入失败：{err}");
-    }
-
-    #[test]
-    fn dedupe_keeps_first_seen_order() {
-        let mut items: Vec<String> = ["b", "a", "b", "c", "a"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        dedupe(&mut items);
-        assert_eq!(items, ["b", "a", "c"]);
     }
 
     #[cfg(unix)]

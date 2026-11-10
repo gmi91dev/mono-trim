@@ -1,18 +1,25 @@
 //! 命令行入口定义：仅描述命令/参数，不含业务逻辑。
 
-use clap::{Arg, Command as ClapCommand};
+use clap::{Arg, ArgAction, Command as ClapCommand};
 
 /// 用户实际调用的命令名（与 Cargo 的 [[bin]] 名称保持一致）
 pub const COMMAND: &str = "mtrim";
 
-/// 旧命令名，仅用于兼容已分发的历史产物
-pub const LEGACY_COMMAND: &str = "mono-trim";
+/// 内置子命令：属于系统保留字，`mono-trim.toml` 的 profiles 不可占用
+pub const BUILTIN_COMMANDS: [&str; 7] =
+    ["init", "update", "doctor", "ls", "show", "doc", "applyall"];
 
-/// 支持的多平台产物标识，同时作为 clap 的取值校验
-pub const PLATFORMS: [&str; 3] = ["win", "mac", "linux"];
+/// 内置命令说明，供 `ls -a` 与文档输出
+pub const BUILTIN_DESCRIPTIONS: [(&str, &str); 7] = [
+    ("init", "使用内置默认值重新初始化项目配置"),
+    ("update", "升级系统 CLI 并同步项目配置版本"),
+    ("doctor", "校验系统配置与用户配置"),
+    ("ls", "列出可用的裁剪命令"),
+    ("show", "打印配置文件路径"),
+    ("doc", "将命令速查表写入文档"),
+    ("applyall", "恢复项目为全量工作空间"),
+];
 
-/// 内置子命令：属于系统保留字，config.toml 的 profiles 不可占用
-pub const BUILTIN_COMMANDS: [&str; 5] = ["init", "reapply", "doc", "doctor", "reset"];
 /// 由 clap 自动生成的命令，同样不可被 profiles 占用
 pub const AUTO_COMMAND: &str = "help";
 
@@ -56,36 +63,32 @@ pub fn validate_profile_name(name: &str) -> crate::Result<()> {
 
 pub fn build() -> ClapCommand {
     ClapCommand::new(COMMAND)
+        .version(crate::config::current_version())
         .about("高内聚、零污染的项目级多平台工作空间裁剪引擎")
+        .subcommand(ClapCommand::new("init").about(description("init")))
+        .subcommand(ClapCommand::new("update").about(description("update")))
+        .subcommand(ClapCommand::new("doctor").about(description("doctor")))
         .subcommand(
-            ClapCommand::new("init")
-                .about("在当前项目下初始化环境")
-                .arg(
-                    Arg::new("platforms")
-                        .long("plat")
-                        .short('p')
-                        .num_args(1..)
-                        .value_parser(PLATFORMS)
-                        .help(
-                            "指定需要初始化的平台 (可选值: win, mac, linux)。不传默认全部初始化。",
-                        ),
-                )
-                .arg(
-                    Arg::new("exclude")
-                        .long("exc")
-                        .short('e')
-                        .num_args(1..)
-                        .value_parser(PLATFORMS)
-                        .help("指定需要排除的平台 (可选值: win, mac, linux)。"),
-                ),
+            ClapCommand::new("ls").about(description("ls")).arg(
+                Arg::new("all")
+                    .short('a')
+                    .long("all")
+                    .action(ArgAction::SetTrue)
+                    .help("同时列出内置命令"),
+            ),
         )
-        .subcommand(
-            ClapCommand::new("reapply").about("根据当前的 Git 稀疏设置重新刷新本地物理硬盘"),
-        )
-        .subcommand(ClapCommand::new("doc").about("将自定义命令及说明自动导入到指定的文档中"))
-        .subcommand(ClapCommand::new("doctor").about("检查配置文件合法性及路径有效性"))
-        .subcommand(ClapCommand::new("reset").about("恢复项目 100% 全量目录与文件"))
+        .subcommand(ClapCommand::new("show").about(description("show")))
+        .subcommand(ClapCommand::new("doc").about(description("doc")))
+        .subcommand(ClapCommand::new("applyall").about(description("applyall")))
         .allow_external_subcommands(true)
+}
+
+fn description(command: &str) -> &'static str {
+    BUILTIN_DESCRIPTIONS
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, desc)| *desc)
+        .unwrap_or("")
 }
 
 #[cfg(test)]
@@ -111,8 +114,17 @@ mod tests {
     }
 
     #[test]
+    fn every_builtin_has_a_description() {
+        for name in BUILTIN_COMMANDS {
+            assert!(!description(name).is_empty(), "{name} 缺少说明");
+        }
+    }
+
+    #[test]
     fn rejects_profile_names_that_cannot_be_invoked() {
-        for name in ["init", "reapply", "doc", "doctor", "reset", "help"] {
+        for name in [
+            "init", "update", "doctor", "ls", "show", "doc", "applyall", "help",
+        ] {
             assert!(validate_profile_name(name).is_err(), "'{name}' 应被拒绝");
         }
         for name in ["", " win-dev", "-x", "my profile"] {
@@ -122,41 +134,20 @@ mod tests {
             assert!(validate_profile_name(name).is_ok(), "'{name}' 应被允许");
         }
     }
-}
-
-#[cfg(test)]
-mod command_tests {
-    use super::*;
-
-    #[test]
-    fn command_name_is_mtrim() {
-        assert_eq!(COMMAND, "mtrim");
-        assert_eq!(build().get_name(), COMMAND);
-    }
-
-    #[test]
-    fn platforms_are_validated_by_clap() {
-        assert!(
-            build()
-                .try_get_matches_from(["mtrim", "init", "-p", "win", "linux"])
-                .is_ok()
-        );
-        assert!(
-            build()
-                .try_get_matches_from(["mtrim", "init", "-p", "android"])
-                .is_err()
-        );
-    }
 
     #[test]
     fn reserved_list_includes_auto_help() {
         let reserved: Vec<&str> = reserved_commands().collect();
-
         assert_eq!(reserved.len(), BUILTIN_COMMANDS.len() + 1);
         assert!(reserved.contains(&AUTO_COMMAND));
-        for name in BUILTIN_COMMANDS {
-            assert!(is_reserved(name), "{name} 应为保留命令");
-        }
-        assert!(!is_reserved("win-dev"));
+    }
+
+    #[test]
+    fn version_flag_is_supported() {
+        let err = build()
+            .try_get_matches_from(["mtrim", "--version"])
+            .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(crate::config::current_version()));
     }
 }

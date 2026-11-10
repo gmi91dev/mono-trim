@@ -48,14 +48,6 @@ impl TempDir {
     }
 }
 
-/// 写入 `.mono-trim/config.toml` 并返回其路径
-pub fn write_config(dir: &TempDir, body: &str) -> PathBuf {
-    dir.write(
-        &format!("{}/{}", crate::config::TOOL_DIR, crate::config::CONFIG_NAME),
-        body,
-    )
-}
-
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);

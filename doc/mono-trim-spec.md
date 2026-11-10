@@ -1,162 +1,174 @@
 # mono-trim 项目技术文档
 
-**mono-trim** 是一款专门为多平台 Monorepo（单一仓库）项目打造的**工作空间拓扑裁剪引擎**。它通过高内聚的本地封闭环境，完美解决了个人开发者或多端团队在克隆项目时“必须拉取异构平台多余代码”的痛点。
+**mono-trim** 是一款面向多平台 Monorepo 的**工作空间拓扑裁剪引擎**。它用 Git 稀疏检出（sparse-checkout）把不属于当前平台的文件从工作区物理移除，只保留你要的那部分；裁剪规则写在**项目内的配置**里，随仓库同步，而工具本身只装在开发者的机器上。
 
 ---
 
-## 📌 核心设计哲学
-1. **高内聚，零污染**：工具本身（三端二进制产物）与项目专属配置文件（`config.toml`）完全内聚在项目根目录的 `.mono-trim/` 隐藏文件夹下，不污染项目根目录。
-2. **工具跟随项目**：配置与工具直接提交至 Git 仓库，实现一次配置，跨设备、多端全自动开箱即用。
-3. **黑白双煞裁剪**：完美支持黑名单（排除指定目录/单文件）与白名单（仅保留指定目录/单文件）两种拓扑裁剪模式。
-4. **命令驱动 + 配套自动化**：日常裁剪行为完全由用户在配置中自定义的子命令驱动，同时内置 `doctor` 自检与 `doc` 文档自动注入功能。
+## 📌 设计原则
+
+1. **本机驱动**：项目里不存放任何二进制，命令由本机安装的 `mtrim` 执行。
+2. **配置即项目状态**：Git 里只有两份配置文件，克隆下来就知道该怎么裁剪。
+3. **系统配置 / 用户配置分离**：工具维护的默认值与版本放在系统配置，用户只在自己的配置里写覆盖项与自定义命令。
+4. **只增不删**：配置字段只新增、不删除不重命名，旧配置永远可用，升级不需要迁移脚本。
+5. **黑白双煞**：`black` 默认保留全部、只排除指定项；`white` 默认隐藏全部、只保留指定项。
 
 ---
 
-## 📁 完美的项目拓扑结构
-
-初始化完成后，您的多平台项目将呈现如下结构：
+## 📁 项目拓扑
 
 ```text
 my-multiplatform-project/
 ├── .git/
-├── .mono-trim/            # 👈 一切关于裁剪能力的黑盒目录
-│   ├── config.toml        # 👈 唯一的、高可读性的本地配置文件
-│   ├── mtrim.exe          # Windows 平台专用的裁剪二进制文件
-│   ├── mtrim-mac          # macOS 平台专用的裁剪二进制文件
-│   └── mtrim-linux        # Linux 平台专用的裁剪二进制文件
-├── rust/                  # 跨平台通用核心逻辑层 (例如 Rust 交叉编译模块)
-└── apps/                  # 异构平台 UI 壳子 (如 apps/android/, apps/ios/)
+├── .mono-trim/
+│   └── config.toml      # 系统配置（工具生成，随仓库提交）
+├── mono-trim.toml       # 用户配置（profiles 写在这里，随仓库提交）
+├── rust/                # 跨平台核心逻辑
+└── apps/                # 异构平台壳子（apps/android/、apps/ios/）
 ```
+
+`.mono-trim/config.toml` 由工具维护，`mono-trim.toml` 由你维护；除此之外项目里不会再产生任何文件。
 
 ---
 
-## ⚙️ 配置文件规范说明 (`.mono-trim/config.toml`)
+## ⚙️ 配置文件规范
 
-`init` 命令会为您生成一份纯净的空白考卷。**每次编辑完该文件后，都建议立刻运行一次 `mtrim doctor` 做自检**，确认无误再执行裁剪命令；`doctor` 会拦截语法错误、非法 `mode`、危险路径与无法被调用的 `profiles` 名称。
+### 1. 系统配置 `.mono-trim/config.toml`
 
-模板内容如下（以 `mtrim init` 实际生成的内容为准）：
+由 `mtrim init` / `mtrim update` 用**内置默认值整体重写**，请勿手工修改：
 
 ```toml
-# =====================================================================
-#                 mono-trim 工作空间裁剪引擎配置文件
-# =====================================================================
-
-# ✅ 重要：每次修改本文件后，请务必先运行一次 `mtrim doctor` 校验配置，
-#    确认无❌错误后再执行自定义裁剪命令，避免非法配置破坏工作空间。
-
-doc_target = "../README.md"
-
-# ⛔ 系统保留命令（内置命令，禁止用作 profiles 名称，否则永远无法触发）：
-#   init / reapply / doc / doctor / reset / help
-
-# 🛠️ 语法结构模板：
-#   [profiles.你的自定义子命令名称]
-#   mode = "black" 或 "white"
-#   desc = "关于这个自定义命令的作用描述"
-#   targets = [ "apps/ios/", "assets/large_video.mp4" ]
-
-# ⚠️ 保护规则：`/`（项目根）、`.git/`、`.mono-trim/` 永远不可被裁剪。
+# 系统配置：由 mono-trim 生成，请勿手工修改（mtrim init / update 会整体重写本文件）
+version = "0.1.0"
+doc_target = "README.md"
 ```
-
-### 字段含义
 
 | 字段 | 说明 |
 | :--- | :--- |
-| `doc_target` | `doc` 命令注入速查表的目标文件。**相对 `.mono-trim/` 解析**，`"../README.md"` 即项目根 README。 |
-| `[profiles.<名称>]` | 自定义子命令名，配置后即为 `mtrim <名称>`。不可与内置保留命令同名，不可含空白字符。 |
-| `mode` | `"black"`：默认保留全部，仅物理排除 `targets`；`"white"`：默认隐藏全部，仅保留 `targets`（根目录文件与 `.mono-trim/` 始终保留）。 |
-| `desc` | 命令说明，`doc` 命令会将其导出到 Markdown 速查表。 |
-| `targets` | 相对项目根目录的路径。目录必须以 `/` 结尾（`"apps/ios/"`），单文件不能以 `/` 结尾（`"assets/large_video.mp4"`）。`/`、`.git/`、`.mono-trim/` 永远不可裁剪。 |
+| `version` | 生成该配置的工具版本，用于提示"项目配置落后/过高" |
+| `doc_target` | `doc` 命令的默认输出位置（相对项目根目录），可被用户配置覆盖 |
 
-### 配置示例
+### 2. 用户配置 `mono-trim.toml`
+
+只写你想覆盖或新增的内容，工具**永不改写**此文件：
 
 ```toml
+# 覆盖系统默认的文档输出位置
+doc_target = "docs/commands.md"
+
 [profiles.win-dev]
 mode = "black"
-desc = "Windows 端 Android 开发环境：隐藏 iOS 原生壳和部分大资产文件"
+desc = "Windows 端开发：隐藏 iOS 壳与大资产"
 targets = ["apps/ios/", "assets/large_video.mp4"]
+```
 
-[profiles.rust-only]
-mode = "white"
-desc = "纯底层纯净模式：仅检出 Rust 核心层和公共配置，不加载任何 UI 壳"
-targets = ["rust/", "Makefile", "Cargo.toml"]
+| 字段 | 说明 |
+| :--- | :--- |
+| `doc_target` | 覆盖系统默认的文档输出位置，相对项目根目录 |
+| `[profiles.<名称>]` | 自定义子命令，之后可用 `mtrim <名称>` 调用 |
+| `mode` | `black`：保留全部，仅排除 `targets`；`white`：隐藏全部，仅保留 `targets` |
+| `desc` | 命令说明，`mtrim ls` 与 `mtrim doc` 会展示 |
+| `targets` | 相对项目根目录的路径；目录以 `/` 结尾（`apps/ios/`），单文件不要以 `/` 结尾 |
+
+### 3. 合并规则
+
+```text
+内置默认值  ←  .mono-trim/config.toml  ←  mono-trim.toml
+```
+
+- 字段级覆盖：用户配置有值就用用户的，没有就用系统配置的，再没有就用内置默认值。
+- `profiles` 按命令名合并，同名时用户配置胜出。
+- `version` 只认系统配置。
+
+### 4. 保护规则
+
+`/`（项目根）、`.git/`、`.mono-trim/` 永远不可被裁剪；`profiles` 名称不能与内置命令同名，也不能含空白字符。
+
+---
+
+## 🚀 命令指南
+
+| 命令 | 作用 |
+| :--- | :--- |
+| `mtrim init` | 用内置默认值重新初始化系统配置；用户配置不存在时创建，存在则不动 |
+| `mtrim update` | 升级系统 CLI；把项目记录的 `version` 同步到当前 CLI 版本（无变化则不写） |
+| `mtrim doctor` | 校验系统配置与用户配置的合法性（语法、字段、profile 命名、目标路径） |
+| `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
+| `mtrim show` | 打印两份配置文件的位置与是否存在 |
+| `mtrim doc` | 把命令速查表写入 `doc_target`（可重复执行，原地更新） |
+| `mtrim applyall` | 恢复项目为全量工作空间（不需要配置文件） |
+| `mtrim <名称>` | 执行用户配置中的 profile |
+
+### 典型输出
+
+```text
+$ mtrim ls
+rust-only  用户 white  仅保留 Rust 核心层
+win-dev    用户 black  隐藏 iOS 壳与大资产
+
+$ mtrim show
+系统配置  ./.mono-trim/config.toml  （存在）
+用户配置  ./mono-trim.toml          （存在）
 ```
 
 ---
 
-## 🚀 命令行工具完整指南
+## 🔄 版本与升级
 
-### 1. 内置刚需命令
-
-#### `mtrim init`
-在当前项目根目录下初始化工具封闭环境。
-* **参数选项**：
-  * `-p, --plat <PLATFORMS>...`：指定需要初始化的平台产物（可选值：`win`, `mac`, `linux`）。不传默认全部拷贝。
-  * `-e, --exc <EXCLUDES>...`：指定需要排除不拷贝的平台产物。
-* **调用示例**：
-  ```bash
-  # 默认全部拷贝
-  mtrim init
-  # 仅拷贝并配置 Windows 和 Linux 端二进制文件
-  mtrim init -p win linux
-  # 拷贝全部，但排除 mac 端
-  mtrim init --exc mac
-  ```
-* **控制台反馈**：执行成功后将输出：
-  ```text
-  ✨ 初始化成功！配置文件已生成，具体配置方法请直接查看该文件：
-  👉 ./.mono-trim/config.toml
-  ⚠️  修改配置后请务必运行一次 `mtrim doctor` 校验，再执行自定义裁剪命令。
-  ```
-
-#### `mtrim reset`
-一键清理当前所有的稀疏裁剪规则，恢复项目 100% 全量的目录与物理文件。
-
-#### `mtrim doctor`
-对当前环境进行健康检查。它会校验 `config.toml` 的语法合法性，逐行比对 `targets` 中的物理路径在当前硬盘中是否存在，精准抛出拼写警告；同时校验 `profiles` 名称是否能真正作为子命令被调用——与内置命令（`init` / `reapply` / `doc` / `doctor` / `reset` / `help`）重名、含空白字符、以 `-` 开头或为空的名称都会直接报错，避免配置写完却永远无法触发。
-
-#### `mtrim doc`
-文档自动化引擎。自动扫描 `config.toml` 中用户编写的所有自定义命令和 `desc` 描述，在 `doc_target` 指定的文件（如根目录 `README.md`）末尾自动喷出一段完美的 Markdown 格式化命令速查表格。
-
-#### `mtrim reapply`
-根据当前本地的 Git 稀疏规则设置，强行重新刷新并同步本地物理硬盘上的文件状态。
+- `mtrim --version` 输出当前 CLI 版本。
+- 系统配置里的 `version` 记录"项目由哪个版本的工具维护"。
+- 各命令发现版本不一致时只给提示，不阻断：
+  - 项目版本更高 → `建议升级系统 CLI`
+  - 项目版本更低 → `可运行 mtrim update 同步`
+- `mtrim update` 的行为：
+  1. 检查是否有新版 CLI，有则下载校验后替换自身；
+  2. 若当前目录已初始化且项目版本落后，用内置默认值重写系统配置并写入新版本；
+  3. 两者都不需要 → 输出"已是最新"，不写任何文件。
+- 配置字段只增不删，所以从旧版本升级到新版本**不需要迁移、备份或重置用户配置**。
 
 ---
 
-### 2. 动态自定义命令 (日常盲跑)
+## 📦 安装
 
-当用户在 `config.toml` 中配置了特定的 `profiles` 节点后（例如 `win-dev`），该节点名称将直接被 CLI 转化为对应的子命令。
+> 发布流水线（GitHub Releases）尚未落地，以下为约定方案。
 
-* **黑名单模式执行逻辑**：
-  自动向 Git 稀疏配置文件中写入 `/*` 允许全部通过，随后对 `targets` 中配置的目录或单文件追加感叹号 `!/path` 进行物理挖除。
-* **白名单模式执行逻辑**：
-  自动向 Git 稀疏配置文件中写入 `/*` 允许根目录基础文件通过（确保 `Makefile`、`Cargo.toml` 等关键引导文件不丢失），并对非白名单目录进行精准封锁，仅向物理硬盘释放白名单内的资产。
-* **调用示例**：
-  ```bash
-  # 执行您自定义的 Windows 开发环境裁剪
-  .\.mono-trim\mtrim win-dev
-  
-  # 执行您自定义的纯 Rust 底层白名单保留
-  .\.mono-trim\mtrim rust-only
-  ```
+**方式一：安装脚本（推荐）** —— 从 Release 下载当前平台产物并放入 PATH。
 
----
-
-## 🛠️ 多平台交叉编译部署指南
-
-作为全局发布或团队内部分发前，推荐在开发机上通过以下命令一键交叉编译出三端产物，并统一放置在您的全局 `PATH` 路径或归档目录下：
+**方式二：从源码安装**
 
 ```bash
-# 1. 编译 Windows 端
-cargo build --release --target x86_64-pc-windows-msvc
-mv target/x86_64-pc-windows-msvc/release/mtrim.exe ./mtrim-win.exe
-
-# 2. 编译 macOS 端
-cargo build --release --target x86_64-apple-darwin
-mv target/x86_64-apple-darwin/release/mtrim ./mtrim-mac
-
-# 3. 编译 Linux 端
-cargo build --release --target x86_64-unknown-linux-gnu
-mv target/x86_64-unknown-linux-gnu/release/mtrim ./mtrim-linux
+cargo install --path .        # 本仓库
+# 或
+cargo install --git https://github.com/gmi91dev/mono-trim.git
 ```
-当全局工具运行 `init` 时，它会智能感知自身所在的二进制目录，并根据用户的包含/排除参数，将对应的 `mtrim-mac` 或 `mtrim.exe` 优雅地克隆进目标项目的 `.mono-trim/` 隐藏资产库中。
+
+**新设备上手**
+
+```bash
+git clone <repo> && cd <repo>
+mtrim doctor        # 校验配置
+mtrim ls            # 看看有哪些裁剪命令
+mtrim win-dev       # 执行自定义裁剪
+```
+
+因为项目里不存放二进制，克隆后不需要任何"安装到项目"的步骤，只要本机有 `mtrim` 即可。
+
+---
+
+## 🧪 开发与测试
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```
+
+测试分为四层：
+
+| 层 | 位置 | 覆盖内容 |
+| :--- | :--- | :--- |
+| 单元测试 | `src/**` | 配置合并、规则生成、路径校验、版本比较、doctor 结论 |
+| 契约测试 | `tests/cli.rs` | 帮助、版本、退出码、各命令端到端行为 |
+| 端到端测试 | `tests/git_sparse.rs` | 真实 Git 下黑白名单与 `applyall` 的文件结果 |
+| 快照测试 | `tests/golden.rs` | 帮助输出、生成的配置、`doc` 表格、`ls` 输出 |
+
+更新快照：`INSTA_UPDATE=always cargo test --test golden`。

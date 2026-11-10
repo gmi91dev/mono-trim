@@ -1,8 +1,6 @@
 //! 集成测试共用工具：临时目录、CLI 调用封装、真实 Git 仓库搭建。
 //!
-//! 集成测试独立编译，无法复用 `src/test_support.rs`，因此这里自带一份最小实现。
-
-// 每个集成测试文件都会独立编译本模块，未在该文件用到的辅助函数并非真的死代码
+//! 每个集成测试文件都会独立编译本模块，未在该文件用到的辅助函数并非真的死代码
 #![allow(dead_code)]
 
 use std::fs;
@@ -10,13 +8,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// 由 Cargo 注入的二进制路径，避免依赖 PATH 或 cargo run
+/// 由 Cargo 注入的二进制路径
 pub const BIN: &str = env!("CARGO_BIN_EXE_mtrim");
 
-/// 配置文件的相对路径，测试中反复用到
-pub const CONFIG_PATH: &str = ".mono-trim/config.toml";
+/// 系统配置的相对路径
+pub const SYSTEM_CONFIG: &str = ".mono-trim/config.toml";
+/// 用户配置的相对路径
+pub const USER_CONFIG: &str = "mono-trim.toml";
 
-/// 集成测试共用的一组 profiles（cli / golden 共用，避免两处维护）
+/// 集成测试共用的一组用户配置
 pub const PROFILES: &str = r#"
 [profiles.win-dev]
 mode = "black"
@@ -90,8 +90,10 @@ pub fn exists(dir: &Path, relative: &str) -> bool {
 
 pub fn append_file(dir: &Path, relative: &str, content: &str) {
     use std::io::Write;
-    let path = dir.join(relative);
-    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join(relative))
+        .unwrap();
     file.write_all(content.as_bytes()).unwrap();
 }
 
@@ -183,20 +185,9 @@ pub fn init_repo(dir: &Path, files: &[(&str, &str)]) {
     );
 }
 
-/// 建仓库并完成 `mtrim init`（多数端到端用例的统一起点）
+/// 建仓库并完成 `mtrim init`
 pub fn init_project(dir: &Path, files: &[(&str, &str)]) {
     init_repo(dir, files);
     let output = mtrim(dir, &["init"]);
     assert!(output.status.success(), "init 失败：{}", stderr(&output));
-}
-
-/// 初始化后本机应部署的二进制名
-pub fn host_binary() -> &'static str {
-    if cfg!(windows) {
-        "mtrim.exe"
-    } else if cfg!(target_os = "macos") {
-        "mtrim-mac"
-    } else {
-        "mtrim-linux"
-    }
 }

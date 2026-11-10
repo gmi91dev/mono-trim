@@ -1,4 +1,4 @@
-//! 真实 Git 稀疏检出的端到端测试：黑名单 / 白名单 / reset 的物理文件结果。
+//! 真实 Git 稀疏检出的端到端测试：黑名单 / 白名单 / applyall 的物理文件结果。
 
 mod common;
 
@@ -24,29 +24,8 @@ fn skip_without_git() -> bool {
 fn setup(label: &str) -> TempDir {
     let dir = TempDir::new(label);
     init_project(dir.path(), PROJECT_FILES);
-    append_file(
-        dir.path(),
-        CONFIG_PATH,
-        r#"
-[profiles.win-dev]
-mode = "black"
-desc = "隐藏 iOS 壳与大资产"
-targets = ["apps/ios/", "assets/large_video.mp4"]
-
-[profiles.rust-only]
-mode = "white"
-desc = "仅保留 Rust 核心层"
-targets = ["rust/", "Makefile"]
-"#,
-    );
+    append_file(dir.path(), USER_CONFIG, PROFILES);
     dir
-}
-
-fn tool_files() -> Vec<String> {
-    vec![
-        CONFIG_PATH.to_string(),
-        format!(".mono-trim/{}", host_binary()),
-    ]
 }
 
 #[test]
@@ -72,13 +51,13 @@ fn black_mode_removes_excluded_paths() {
     assert!(files.contains(&"apps/android/Main.kt".to_string()));
     assert!(files.contains(&"rust/src/main.rs".to_string()));
     assert!(
-        files.contains(&CONFIG_PATH.to_string()),
-        "工具自身必须保留：{files:?}"
+        files.contains(&SYSTEM_CONFIG.to_string()),
+        "配置文件必须保留：{files:?}"
     );
 }
 
 #[test]
-fn white_mode_keeps_only_whitelist_and_tool_dir() {
+fn white_mode_keeps_only_whitelist() {
     if skip_without_git() {
         return;
     }
@@ -88,29 +67,34 @@ fn white_mode_keeps_only_whitelist_and_tool_dir() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).contains("白名单仅保留"));
 
-    let mut expected = tool_files();
-    expected.extend(["Makefile".to_string(), "rust/src/main.rs".to_string()]);
+    let mut expected = vec![
+        "Makefile".to_string(),
+        "rust/src/main.rs".to_string(),
+        SYSTEM_CONFIG.to_string(),
+        USER_CONFIG.to_string(),
+    ];
     expected.sort();
 
     assert_eq!(list_files(dir.path()), expected);
 }
 
 #[test]
-fn reset_restores_full_workspace() {
+fn applyall_restores_full_workspace() {
     if skip_without_git() {
         return;
     }
-    let dir = setup("sparse-reset");
+    let dir = setup("sparse-applyall");
     assert!(mtrim(dir.path(), &["rust-only"]).status.success());
 
-    let output = mtrim(dir.path(), &["reset"]);
+    let output = mtrim(dir.path(), &["applyall"]);
     assert!(output.status.success(), "{}", stderr(&output));
 
     let mut expected: Vec<String> = PROJECT_FILES
         .iter()
         .map(|(path, _)| path.to_string())
         .collect();
-    expected.extend(tool_files());
+    expected.push(SYSTEM_CONFIG.to_string());
+    expected.push(USER_CONFIG.to_string());
     expected.sort();
 
     assert_eq!(list_files(dir.path()), expected);
@@ -136,16 +120,16 @@ fn switching_profiles_refreshes_sparse_rules() {
 }
 
 #[test]
-fn reapply_refreshes_existing_sparse_rules() {
+fn applyall_is_idempotent() {
     if skip_without_git() {
         return;
     }
-    let dir = setup("sparse-reapply");
+    let dir = setup("sparse-applyall-twice");
     assert!(mtrim(dir.path(), &["win-dev"]).status.success());
-    let before = list_files(dir.path());
+    assert!(mtrim(dir.path(), &["applyall"]).status.success());
+    let once = list_files(dir.path());
 
-    let output = mtrim(dir.path(), &["reapply"]);
+    assert!(mtrim(dir.path(), &["applyall"]).status.success());
 
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(list_files(dir.path()), before);
+    assert_eq!(list_files(dir.path()), once);
 }

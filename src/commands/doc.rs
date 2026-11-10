@@ -1,30 +1,37 @@
-//! `doc`：把 profiles 渲染成 Markdown 速查表并注入目标文档。
+//! `doc`：把用户命令渲染成 Markdown 速查表并注入目标文档。
 
 use std::fs;
 use std::io;
-use std::path::Path;
 
 use crate::Result;
 use crate::cli::COMMAND;
-use crate::config::{self, Config, DEFAULT_DOC_TARGET, TOOL_DIR};
+use crate::config::{Config, Project};
 use crate::util::write_file;
 
 /// 注入区块的起止标记，用于重复执行时原地更新而非无限追加
 const DOC_BEGIN: &str = "<!-- mono-trim:begin -->";
 const DOC_END: &str = "<!-- mono-trim:end -->";
 
-pub fn run(config_path: &Path) -> Result<()> {
-    let config = config::read_config(config_path)?;
-    let relative_target = config.doc_target.as_deref().unwrap_or(DEFAULT_DOC_TARGET);
-    // doc_target 相对配置文件所在目录（即 .mono-trim/）解析，"../README.md" 才指向项目根
-    let tool_dir = config::tool_dir_of(config_path);
-    let target_path = tool_dir.join(relative_target);
+pub fn run(project: &Project) -> Result<()> {
+    if !project.is_initialized() {
+        return Err(format!(
+            "未发现系统配置 {}，请先运行 mtrim init",
+            project.system_config_display()
+        ));
+    }
+
+    let config = project.load()?;
+    if let Some(hint) = config.version_hint() {
+        println!("⚠️  {hint}");
+    }
+
+    let target_path = project.doc_target_path(&config);
     let block = render_block(&config);
 
     let existing = match fs::read_to_string(&target_path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("读取文档 '{relative_target}' 失败：{e}")),
+        Err(e) => return Err(format!("读取文档 '{}' 失败：{e}", config.doc_target)),
     };
 
     if let Some(parent) = target_path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -34,7 +41,8 @@ pub fn run(config_path: &Path) -> Result<()> {
     write_file(&target_path, &replace_block(&existing, &block))?;
 
     println!(
-        "✨ 文档已更新至 {relative_target}（导出 {} 条自定义命令）。",
+        "✨ 文档已更新至 {}（导出 {} 条自定义命令）。",
+        config.doc_target,
         config.profiles.len()
     );
     Ok(())
@@ -44,16 +52,16 @@ fn render_block(config: &Config) -> String {
     let mut block = String::from(DOC_BEGIN);
     block.push_str("\n## 🛠️ 项目工作空间裁剪命令\n\n");
     block.push_str("| 命令 | 模式 | 功能说明 |\n| :--- | :--- | :--- |\n");
-    for name in config::sorted_profiles(config) {
+    for name in config.sorted_profile_names() {
         let profile = &config.profiles[name];
         block.push_str(&format!(
-            "| `./{TOOL_DIR}/{COMMAND} {name}` | `{}` | {} |\n",
+            "| `{COMMAND} {name}` | `{}` | {} |\n",
             profile.mode,
             escape_cell(&profile.desc)
         ));
     }
     block.push_str(&format!(
-        "| `./{TOOL_DIR}/{COMMAND} reset` | `全量` | 恢复完整工作空间 |\n"
+        "| `{COMMAND} applyall` | `全量` | 恢复完整工作空间 |\n"
     ));
     block.push_str(DOC_END);
     block
@@ -91,68 +99,35 @@ fn escape_cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn replaces_existing_block_in_place() {
-        let block = format!("{DOC_BEGIN}\nNEW\n{DOC_END}");
-        let existing = format!("# 标题\n\n{DOC_BEGIN}\nold\n{DOC_END}\n\n## 结尾\n");
-        let updated = replace_block(&existing, &block);
-        assert_eq!(updated, format!("# 标题\n\n{block}\n\n## 结尾\n"));
-        // 幂等：再跑一次结果不变
-        assert_eq!(replace_block(&updated, &block), updated);
-    }
-
-    #[test]
-    fn drops_unterminated_block() {
-        let block = format!("{DOC_BEGIN}\nNEW\n{DOC_END}");
-        let existing = format!("# 标题\n\n{DOC_BEGIN}\n脏数据");
-        assert_eq!(
-            replace_block(&existing, &block),
-            format!("# 标题\n\n{block}\n")
-        );
-    }
-
-    #[test]
-    fn appends_when_no_block() {
-        assert_eq!(replace_block("# 标题\n", "NEW"), "# 标题\n\nNEW\n");
-        assert_eq!(replace_block("", "NEW"), "NEW\n");
-    }
-
-    #[test]
-    fn escapes_pipes_for_markdown_table() {
-        assert_eq!(escape_cell("a | b\nc"), "a \\| b c");
-    }
-}
-
-#[cfg(test)]
-mod block_tests {
-    use super::*;
-    use crate::test_support::{TempDir, write_config};
+    use crate::test_support::TempDir;
 
     fn config_from(body: &str) -> Config {
-        toml::from_str(body).unwrap()
+        let user: crate::config::UserConfig = toml::from_str(body).unwrap();
+        Config {
+            version: "0.1.0".into(),
+            doc_target: "README.md".into(),
+            profiles: user.profiles,
+        }
     }
 
     #[test]
-    fn render_block_sorts_profiles_and_escapes_cells() {
+    fn block_sorts_profiles_and_escapes_cells() {
         let config = config_from(
             r#"[profiles.zeta]
 mode = "white"
 desc = "含 | 管道符"
-targets = []
 
 [profiles.alpha]
 mode = "black"
 desc = "普通说明"
-targets = []
 "#,
         );
 
         let block = render_block(&config);
         assert!(block.starts_with(DOC_BEGIN));
         assert!(block.ends_with(DOC_END));
-        assert!(block.contains(r"含 \| 管道符"), "表格内管道符需转义");
-        assert!(block.contains(&format!("./{TOOL_DIR}/mtrim reset")));
+        assert!(block.contains("含 \\| 管道符"), "表格内管道符需转义");
+        assert!(block.contains("mtrim applyall"));
 
         let alpha = block.find("mtrim alpha").unwrap();
         let zeta = block.find("mtrim zeta").unwrap();
@@ -160,43 +135,59 @@ targets = []
     }
 
     #[test]
-    fn run_writes_document_relative_to_tool_dir_and_is_idempotent() {
+    fn run_writes_document_relative_to_project_root_and_is_idempotent() {
         let dir = TempDir::new("doc-run");
-        let config_path = write_config(
-            &dir,
-            r#"doc_target = "../README.md"
-
-[profiles.win-dev]
-mode = "black"
-desc = "隐藏 iOS 壳"
-targets = ["apps/ios/"]
-"#,
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
+            "doc_target = \"docs/commands.md\"\n\n[profiles.win-dev]\nmode = \"black\"\ndesc = \"隐藏 iOS 壳\"\n",
         );
-        dir.write("README.md", "# 项目说明\n");
+        dir.write("docs/commands.md", "# 文档\n");
+        let project = Project::from_root(dir.path());
 
-        run(&config_path).unwrap();
-        let first = dir.read("README.md");
-        assert!(first.starts_with("# 项目说明"), "应保留原有内容");
+        run(&project).unwrap();
+        let first = dir.read("docs/commands.md");
+        assert!(first.starts_with("# 文档"), "应保留原有内容");
         assert_eq!(first.matches(DOC_BEGIN).count(), 1);
 
-        run(&config_path).unwrap();
-        assert_eq!(dir.read("README.md"), first, "重复执行不应产生重复区块");
+        run(&project).unwrap();
+        assert_eq!(
+            dir.read("docs/commands.md"),
+            first,
+            "重复执行不应产生重复区块"
+        );
     }
 
     #[test]
     fn run_creates_missing_document() {
         let dir = TempDir::new("doc-create");
-        let config_path = write_config(
-            &dir,
-            r#"doc_target = "../docs/commands.md"
-"#,
-        );
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        let project = Project::from_root(dir.path());
 
-        run(&config_path).unwrap();
+        run(&project).unwrap();
 
-        let doc = dir.read("docs/commands.md");
+        let doc = dir.read("README.md");
         assert!(doc.contains(DOC_BEGIN));
-        assert!(doc.contains("mtrim reset"));
-        assert!(dir.exists("docs/commands.md"));
+        assert!(doc.contains("mtrim applyall"));
+    }
+
+    #[test]
+    fn replace_block_behaviour() {
+        let block = format!("{DOC_BEGIN}\nNEW\n{DOC_END}");
+        let existing = format!("# 标题\n\n{DOC_BEGIN}\nold\n{DOC_END}\n\n## 结尾\n");
+        let updated = replace_block(&existing, &block);
+        assert_eq!(updated, format!("# 标题\n\n{block}\n\n## 结尾\n"));
+        assert_eq!(replace_block(&updated, &block), updated, "应幂等");
+
+        let broken = format!("# 标题\n\n{DOC_BEGIN}\n脏数据");
+        assert_eq!(
+            replace_block(&broken, &block),
+            format!("# 标题\n\n{block}\n")
+        );
+    }
+
+    #[test]
+    fn escape_cell_replaces_pipes_and_newlines() {
+        assert_eq!(escape_cell("a | b\nc"), "a \\| b c");
     }
 }

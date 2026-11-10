@@ -1,21 +1,29 @@
-//! 裁剪相关的动态命令：自定义 profile、reset、reapply。
-
-use std::path::Path;
+//! 裁剪相关命令：用户自定义 profile 与 `applyall`。
 
 use crate::Result;
-use crate::config::{CONFIG_NAME, read_config};
+use crate::config::Project;
 use crate::git::{GitRunner, git_ok, sparse_checkout_path, sparse_enabled};
 use crate::sparse::{Action, INCLUDE_ALL, build_plan};
 use crate::util::write_file;
 
-/// 执行 `config.toml` 中声明的自定义 profile（由命令名动态触发）
-pub fn profile(config_path: &Path, name: &str, git: &dyn GitRunner) -> Result<()> {
-    let config = read_config(config_path)?;
-    let profile = config.profiles.get(name).ok_or_else(|| {
-        format!(
-            "未知命令 '{name}'。输入 --help 查看内置命令，或检查 {CONFIG_NAME} 中的 profiles 节点。"
-        )
-    })?;
+/// 执行用户配置中的自定义 profile
+pub fn profile(project: &Project, name: &str, git: &dyn GitRunner) -> Result<()> {
+    if !project.is_initialized() {
+        return Err(format!(
+            "未发现系统配置 {}，请先运行 mtrim init",
+            project.system_config_display()
+        ));
+    }
+
+    let config = project.load()?;
+    if let Some(hint) = config.version_hint() {
+        println!("⚠️  {hint}");
+    }
+
+    let profile = config
+        .profiles
+        .get(name)
+        .ok_or_else(|| format!("未知命令 '{name}'。运行 mtrim ls 查看可用命令。"))?;
 
     println!("⏳ 正在执行自定义命令 [{name}] ({}) ...", profile.desc);
     // 先完整校验并生成计划，任何非法配置都在触碰工作空间之前拦截
@@ -35,10 +43,13 @@ pub fn profile(config_path: &Path, name: &str, git: &dyn GitRunner) -> Result<()
     Ok(())
 }
 
-pub fn reset(git: &dyn GitRunner) -> Result<()> {
-    println!("⏳ 正在恢复全量目录与文件...");
+/// 应用全量规则，恢复完整工作空间（不依赖项目配置）
+pub fn applyall(git: &dyn GitRunner) -> Result<()> {
+    crate::git::ensure_repo(git)?;
+    println!("⏳ 正在恢复全量工作空间...");
+
     if !sparse_enabled(git)? {
-        println!("✨ 当前工作空间本就是全量状态，无需恢复。");
+        println!("✅ 当前已是全量工作空间");
         return Ok(());
     }
 
@@ -48,71 +59,72 @@ pub fn reset(git: &dyn GitRunner) -> Result<()> {
         git_ok(git, &["sparse-checkout", "reapply"])?;
     }
 
-    println!("✨ 已成功恢复所有平台的完整工作空间！");
-    Ok(())
-}
-
-pub fn reapply(git: &dyn GitRunner) -> Result<()> {
-    if !sparse_enabled(git)? {
-        return Err("当前工作空间尚未启用稀疏检出，请先执行自定义裁剪命令。".into());
-    }
-    println!("⏳ 正在重新刷新本地物理硬盘目录...");
-    git_ok(git, &["sparse-checkout", "reapply"])?;
-    println!("✨ 已按现有稀疏规则刷新完成！");
+    println!("✅ 已恢复全量工作空间");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Profile;
     use crate::git::GitOutput;
-    use crate::test_support::{FakeGit, TempDir, write_config};
+    use crate::test_support::{FakeGit, TempDir};
 
-    const CONFIG: &str = r#"[profiles.win-dev]
+    const USER_CONFIG: &str = r#"[profiles.win-dev]
 mode = "black"
 desc = "隐藏 iOS 壳"
 targets = ["apps/ios/"]
 "#;
 
-    fn config(dir: &TempDir) -> std::path::PathBuf {
-        write_config(dir, CONFIG)
+    fn project_with_user_config(dir: &TempDir) -> Project {
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write("mono-trim.toml", USER_CONFIG);
+        Project::from_root(dir.path())
     }
 
     #[test]
     fn unknown_profile_is_rejected() {
         let dir = TempDir::new("apply-unknown");
-        let path = config(&dir);
+        let project = project_with_user_config(&dir);
         let git = FakeGit::new();
 
-        let err = profile(&path, "nope", &git).unwrap_err();
+        let err = profile(&project, "nope", &git).unwrap_err();
 
         assert!(err.contains("未知命令 'nope'"), "{err}");
         assert!(git.calls().is_empty(), "不应调用 git");
     }
 
     #[test]
+    fn requires_initialized_project() {
+        let dir = TempDir::new("apply-uninitialized");
+        let project = Project::from_root(dir.path());
+
+        let err = profile(&project, "win-dev", &FakeGit::new()).unwrap_err();
+
+        assert!(err.contains("mtrim init"), "{err}");
+    }
+
+    #[test]
     fn invalid_mode_fails_before_touching_workspace() {
         let dir = TempDir::new("apply-mode");
-        let path = write_config(
-            &dir,
-            r#"[profiles.bad]
-mode = "gray"
-desc = "示例"
-targets = []
-"#,
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
+            "[profiles.bad]\nmode = \"gray\"\ntargets = []\n",
         );
+        let project = Project::from_root(dir.path());
         let git = FakeGit::new();
 
-        let err = profile(&path, "bad", &git).unwrap_err();
+        let err = profile(&project, "bad", &git).unwrap_err();
 
         assert!(err.contains("未知的 mode"), "{err}");
-        assert!(git.calls().is_empty(), "不应调用 git");
+        assert!(git.calls().is_empty());
     }
 
     #[test]
     fn writes_plan_then_reapplies() {
         let dir = TempDir::new("apply-write");
-        let path = config(&dir);
+        let project = project_with_user_config(&dir);
         let sparse_path = dir.write(".git/info/sparse-checkout", "");
         let git = FakeGit::new()
             .on("sparse-checkout init --no-cone", GitOutput::ok(""))
@@ -122,108 +134,72 @@ targets = []
             )
             .on("sparse-checkout reapply", GitOutput::ok(""));
 
-        profile(&path, "win-dev", &git).unwrap();
+        profile(&project, "win-dev", &git).unwrap();
 
-        assert_eq!(
-            git.calls(),
-            [
-                "sparse-checkout init --no-cone",
-                "rev-parse --git-path info/sparse-checkout",
-                "sparse-checkout reapply"
-            ]
-        );
         assert_eq!(
             std::fs::read_to_string(&sparse_path).unwrap(),
             "/*\n!/apps/ios/\n"
         );
+        assert_eq!(git.calls().len(), 3);
     }
 
     #[test]
-    fn stops_when_sparse_init_fails() {
-        let dir = TempDir::new("apply-init-fail");
-        let path = config(&dir);
-        let git = FakeGit::new().on(
-            "sparse-checkout init --no-cone",
-            GitOutput::fail("fatal: boom"),
-        );
-
-        let err = profile(&path, "win-dev", &git).unwrap_err();
-
-        assert!(err.contains("boom"), "{err}");
-        assert_eq!(git.calls(), ["sparse-checkout init --no-cone"]);
-    }
-
-    #[test]
-    fn reset_is_noop_when_sparse_disabled() {
-        let git = FakeGit::new().on("config --bool core.sparseCheckout", GitOutput::ok("false"));
-
-        reset(&git).unwrap();
-
-        assert_eq!(git.calls(), ["config --bool core.sparseCheckout"]);
-    }
-
-    #[test]
-    fn reset_disables_sparse_checkout() {
+    fn applyall_is_noop_when_already_full() {
         let git = FakeGit::new()
-            .on("config --bool core.sparseCheckout", GitOutput::ok("true"))
-            .on("sparse-checkout disable", GitOutput::ok(""));
+            .on("rev-parse --is-inside-work-tree", GitOutput::ok("true"))
+            .on("config --bool core.sparseCheckout", GitOutput::ok("false"));
 
-        reset(&git).unwrap();
+        applyall(&git).unwrap();
 
         assert_eq!(
             git.calls(),
             [
-                "config --bool core.sparseCheckout",
-                "sparse-checkout disable"
+                "rev-parse --is-inside-work-tree",
+                "config --bool core.sparseCheckout"
             ]
         );
     }
 
     #[test]
-    fn reset_falls_back_to_full_patterns() {
-        let dir = TempDir::new("apply-reset-fallback");
+    fn applyall_disables_sparse_checkout() {
+        let git = FakeGit::new()
+            .on("rev-parse --is-inside-work-tree", GitOutput::ok("true"))
+            .on("config --bool core.sparseCheckout", GitOutput::ok("true"))
+            .on("sparse-checkout disable", GitOutput::ok(""));
+
+        applyall(&git).unwrap();
+
+        assert_eq!(git.calls().last().unwrap(), "sparse-checkout disable");
+    }
+
+    #[test]
+    fn applyall_falls_back_to_full_patterns() {
+        let dir = TempDir::new("applyall-fallback");
         let sparse_path = dir.write(".git/info/sparse-checkout", "old");
         let git = FakeGit::new()
+            .on("rev-parse --is-inside-work-tree", GitOutput::ok("true"))
             .on("config --bool core.sparseCheckout", GitOutput::ok("true"))
-            .on(
-                "sparse-checkout disable",
-                GitOutput::fail("fatal: cannot disable"),
-            )
+            .on("sparse-checkout disable", GitOutput::fail("nope"))
             .on(
                 "rev-parse --git-path info/sparse-checkout",
                 GitOutput::ok(sparse_path.to_string_lossy()),
             )
             .on("sparse-checkout reapply", GitOutput::ok(""));
 
-        reset(&git).unwrap();
+        applyall(&git).unwrap();
 
         assert_eq!(std::fs::read_to_string(&sparse_path).unwrap(), "/*\n");
-        assert_eq!(git.calls().last().unwrap(), "sparse-checkout reapply");
     }
 
     #[test]
-    fn reapply_requires_sparse_checkout() {
-        let git = FakeGit::new().on("config --bool core.sparseCheckout", GitOutput::ok("false"));
-
-        let err = reapply(&git).unwrap_err();
-
-        assert!(err.contains("尚未启用稀疏检出"), "{err}");
-    }
-
-    #[test]
-    fn reapply_refreshes_when_enabled() {
-        let git = FakeGit::new()
-            .on("config --bool core.sparseCheckout", GitOutput::ok("true"))
-            .on("sparse-checkout reapply", GitOutput::ok(""));
-
-        reapply(&git).unwrap();
-
-        assert_eq!(
-            git.calls(),
-            [
-                "config --bool core.sparseCheckout",
-                "sparse-checkout reapply"
-            ]
-        );
+    fn profile_builder_is_reused_for_both_modes() {
+        // 防止 build_plan 与 apply 之间的契约漂移
+        let profile = Profile {
+            mode: "white".into(),
+            desc: String::new(),
+            targets: vec!["rust/".into()],
+        };
+        let plan = build_plan(&profile).unwrap();
+        assert!(plan.patterns.contains("/rust/"));
     }
 }

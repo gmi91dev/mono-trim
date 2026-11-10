@@ -1,60 +1,54 @@
-//! `config.toml` 的数据结构、模板与读取。
+//! 项目配置：系统配置（`.mono-trim/config.toml`）+ 用户配置（`mono-trim.toml`）。
+//!
+//! - 系统配置由工具生成（`init` / `update` 会整体重写），记录版本号与默认值；
+//! - 用户配置由用户维护，只写需要覆盖的字段与自定义 `profiles`；
+//! - 运行时按「系统 ← 用户」合并，用户字段优先。
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::Result;
-use crate::cli::COMMAND;
 use crate::git::{GitRunner, project_root};
+use crate::util::write_file;
+use crate::version;
 
-/// 工具自身与配置所在的封闭目录（严禁被裁剪）
+/// 工具封闭目录（系统配置所在）
 pub const TOOL_DIR: &str = ".mono-trim";
-pub const CONFIG_NAME: &str = "config.toml";
-pub const DEFAULT_DOC_TARGET: &str = "../README.md";
+/// 系统配置文件名
+pub const SYSTEM_CONFIG: &str = "config.toml";
+/// 用户配置文件名（项目根目录）
+pub const USER_CONFIG: &str = "mono-trim.toml";
+/// 默认文档输出位置（相对项目根目录）
+pub const DEFAULT_DOC_TARGET: &str = "README.md";
 
-const TEMPLATE: &str = r#"# =====================================================================
-#                 mono-trim 工作空间裁剪引擎配置文件
-# =====================================================================
-
-# ✅ 重要：每次修改本文件后，请务必先运行一次 `{command} doctor` 校验配置，
-#    确认无❌错误后再执行自定义裁剪命令，避免非法配置破坏工作空间。
-
-doc_target = "{doc_target}"
-
-# ⛔ 系统保留命令（内置命令，禁止用作 profiles 名称，否则永远无法触发）：
-#   {reserved}
-
-# 🛠️ 语法结构模板：
-#   [profiles.你的自定义子命令名称]
-#   mode = "black" 或 "white"
-#   desc = "关于这个自定义命令的作用描述"
-#   targets = [ "apps/ios/", "assets/large_video.mp4" ]
-
-# ⚠️ 保护规则：`/`（项目根）、`.git/`、`.mono-trim/` 永远不可被裁剪。
-"#;
-
-/// 初始化时写入的完整配置模板（保留命令列表由 `cli` 提供，避免两处漂移）
-pub fn template() -> String {
-    let reserved = crate::cli::reserved_commands()
-        .collect::<Vec<_>>()
-        .join(" / ");
-    TEMPLATE
-        .replace("{reserved}", &reserved)
-        .replace("{command}", COMMAND)
-        .replace("{doc_target}", DEFAULT_DOC_TARGET)
+pub fn current_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
+/// 系统配置：工具维护，`init` / `update` 会用内置默认值整体重写
 #[derive(Deserialize, Debug, Default)]
-pub struct Config {
+pub struct SystemConfig {
+    #[serde(default)]
+    pub version: Option<String>,
     #[serde(default)]
     pub doc_target: Option<String>,
     #[serde(default)]
     pub profiles: HashMap<String, Profile>,
 }
 
-#[derive(Deserialize, Debug)]
+/// 用户配置：用户维护，只写覆盖项与自定义命令
+#[derive(Deserialize, Debug, Default)]
+pub struct UserConfig {
+    #[serde(default)]
+    pub doc_target: Option<String>,
+    #[serde(default)]
+    pub profiles: HashMap<String, Profile>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct Profile {
     pub mode: String,
     #[serde(default)]
@@ -63,41 +57,181 @@ pub struct Profile {
     pub targets: Vec<String>,
 }
 
-/// 配置文件路径：以 Git 顶层目录为基准，支持在子目录中调用
-pub fn path(git: &dyn GitRunner) -> PathBuf {
-    project_root(git).join(TOOL_DIR).join(CONFIG_NAME)
+/// 合并后的最终配置
+#[derive(Debug)]
+pub struct Config {
+    pub version: String,
+    pub doc_target: String,
+    pub profiles: HashMap<String, Profile>,
 }
 
-/// 面向用户的配置文件相对路径（提示语统一使用）
-pub fn display_path() -> String {
-    format!("./{TOOL_DIR}/{CONFIG_NAME}")
+impl Config {
+    /// profile 名称按字典序排列，保证输出稳定
+    pub fn sorted_profile_names(&self) -> Vec<&String> {
+        let mut names: Vec<&String> = self.profiles.keys().collect();
+        names.sort();
+        names
+    }
+
+    /// 当前 CLI 与项目记录版本不一致时给出提示
+    pub fn version_hint(&self) -> Option<String> {
+        let current = current_version();
+        if self.version == current {
+            return None;
+        }
+        if version::is_newer(&self.version, current) {
+            Some(format!(
+                "项目配置由更高版本（{}）写入，当前 mtrim 为 {current}，建议升级系统 CLI",
+                self.version
+            ))
+        } else {
+            Some(format!(
+                "项目配置版本（{}）落后于当前 mtrim（{current}），可运行 mtrim update 同步",
+                self.version
+            ))
+        }
+    }
 }
 
-/// 由配置文件路径反推 `.mono-trim` 目录
-pub fn tool_dir_of(config_path: &Path) -> &Path {
-    config_path.parent().unwrap_or(Path::new("."))
+/// 项目上下文：根目录与两份配置的位置
+pub struct Project {
+    root: PathBuf,
 }
 
-/// 由配置文件路径反推项目根目录
-pub fn project_root_of(config_path: &Path) -> &Path {
-    tool_dir_of(config_path).parent().unwrap_or(Path::new("."))
+impl Project {
+    pub fn detect(git: &dyn GitRunner) -> Self {
+        Self {
+            root: project_root(git),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_root(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn tool_dir(&self) -> PathBuf {
+        self.root.join(TOOL_DIR)
+    }
+
+    pub fn system_config(&self) -> PathBuf {
+        self.tool_dir().join(SYSTEM_CONFIG)
+    }
+
+    pub fn user_config(&self) -> PathBuf {
+        self.root.join(USER_CONFIG)
+    }
+
+    pub fn system_config_display(&self) -> String {
+        format!("./{TOOL_DIR}/{SYSTEM_CONFIG}")
+    }
+
+    pub fn user_config_display(&self) -> String {
+        format!("./{USER_CONFIG}")
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.system_config().exists()
+    }
+
+    /// 读取并合并两份配置（缺失的文件按默认值处理）
+    pub fn load(&self) -> Result<Config> {
+        let system: SystemConfig = read_optional(&self.system_config())?.unwrap_or_default();
+        let user: UserConfig = read_optional(&self.user_config())?.unwrap_or_default();
+
+        let mut profiles = system.profiles;
+        profiles.extend(user.profiles);
+
+        Ok(Config {
+            version: system
+                .version
+                .unwrap_or_else(|| current_version().to_string()),
+            doc_target: user
+                .doc_target
+                .or(system.doc_target)
+                .unwrap_or_else(|| DEFAULT_DOC_TARGET.to_string()),
+            profiles,
+        })
+    }
+
+    /// 只读系统配置，主要用于 `update` / `doctor`
+    pub fn load_system(&self) -> Result<SystemConfig> {
+        Ok(read_optional(&self.system_config())?.unwrap_or_default())
+    }
+
+    /// 用内置默认值重写系统配置（不触碰用户配置）
+    pub fn write_system_config(&self, version: &str) -> Result<()> {
+        fs::create_dir_all(self.tool_dir())
+            .map_err(|e| format!("创建 {TOOL_DIR} 目录失败：{e}"))?;
+        write_file(&self.system_config(), &system_config_content(version))
+    }
+
+    /// 用户配置不存在时写入最小模板，返回是否新建
+    pub fn ensure_user_config(&self) -> Result<bool> {
+        if self.user_config().exists() {
+            return Ok(false);
+        }
+        write_file(&self.user_config(), USER_CONFIG_TEMPLATE)?;
+        Ok(true)
+    }
+
+    /// 文档输出位置（相对项目根目录解析）
+    pub fn doc_target_path(&self, config: &Config) -> PathBuf {
+        self.root.join(&config.doc_target)
+    }
 }
 
-pub fn read_config(path: &Path) -> Result<Config> {
-    let content = fs::read_to_string(path).map_err(|e| {
-        format!(
-            "未发现或无法读取配置文件 {}（{e}），请先运行 {COMMAND} init。",
-            display_path()
-        )
-    })?;
-    toml::from_str(&content).map_err(|e| format!("配置文件 {} 语法错误：{e}", display_path()))
+/// 系统配置内容：内置默认值 + 版本号
+pub fn system_config_content(version: &str) -> String {
+    format!(
+        "# 系统配置：由 mono-trim 生成，请勿手工修改（mtrim init / update 会整体重写本文件）\n\
+         version = \"{version}\"\n\
+         doc_target = \"{DEFAULT_DOC_TARGET}\"\n"
+    )
 }
 
-/// 配置中的 profile 名称按字典序排列，保证输出稳定
-pub fn sorted_profiles(config: &Config) -> Vec<&String> {
-    let mut names: Vec<&String> = config.profiles.keys().collect();
-    names.sort();
-    names
+pub const USER_CONFIG_TEMPLATE: &str = r#"# 用户配置：只写需要覆盖或新增的内容
+#
+# 自定义裁剪命令：
+#   [profiles.命令名]
+#   mode = "black"   # black：保留全部，排除 targets；white：仅保留 targets
+#   desc = "命令说明（mtrim ls / doc 会展示）"
+#   targets = ["apps/ios/", "assets/large_video.mp4"]
+#
+# 覆盖系统默认的文档输出位置（相对项目根目录）：
+# doc_target = "docs/commands.md"
+"#;
+
+pub fn read_system(path: &Path) -> Result<SystemConfig> {
+    read_required(path, "系统配置")
+}
+
+pub fn read_user(path: &Path) -> Result<UserConfig> {
+    read_required(path, "用户配置")
+}
+
+fn read_required<T: DeserializeOwned>(path: &Path, label: &str) -> Result<T> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("无法读取{label} {}（{e}）", display(path)))?;
+    toml::from_str(&content).map_err(|e| format!("{label} {} 语法错误：{e}", display(path)))
+}
+
+fn read_optional<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+    match fs::read_to_string(path) {
+        Ok(content) => toml::from_str(&content)
+            .map(Some)
+            .map_err(|e| format!("{} 语法错误：{e}", display(path))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("无法读取 {}（{e}）", display(path))),
+    }
+}
+
+fn display(path: &Path) -> String {
+    path.display().to_string()
 }
 
 #[cfg(test)]
@@ -105,75 +239,105 @@ mod tests {
     use super::*;
     use crate::test_support::TempDir;
 
+    fn write(dir: &TempDir, relative: &str, content: &str) -> PathBuf {
+        dir.write(relative, content)
+    }
+
     #[test]
-    fn template_is_valid_config_and_mentions_reserved_commands() {
-        let text = template();
+    fn user_config_overrides_system_config() {
+        let dir = TempDir::new("config-merge");
+        write(
+            &dir,
+            ".mono-trim/config.toml",
+            "version = \"0.1.0\"\ndoc_target = \"README.md\"\n",
+        );
+        write(
+            &dir,
+            "mono-trim.toml",
+            "doc_target = \"docs/commands.md\"\n\n[profiles.win-dev]\nmode = \"black\"\ndesc = \"x\"\ntargets = []\n",
+        );
+        let project = Project::from_root(dir.path());
 
-        assert!(!text.contains("{command}"), "命令名占位符应被替换");
-        assert!(!text.contains("{reserved}"), "保留命令占位符应被替换");
-        assert!(text.contains("mtrim doctor"), "模板应提示运行 doctor");
-        assert!(text.contains("init / reapply / doc / doctor / reset / help"));
+        let config = project.load().unwrap();
 
-        // 生成的模板必须能被自身解析，否则 init 完就会 doctor 失败
-        let config: Config = toml::from_str(&text).unwrap();
+        assert_eq!(config.version, "0.1.0");
+        assert_eq!(config.doc_target, "docs/commands.md");
+        assert!(config.profiles.contains_key("win-dev"));
+    }
+
+    #[test]
+    fn falls_back_to_builtin_defaults() {
+        let dir = TempDir::new("config-empty");
+        let project = Project::from_root(dir.path());
+
+        let config = project.load().unwrap();
+
+        assert_eq!(config.version, current_version());
+        assert_eq!(config.doc_target, DEFAULT_DOC_TARGET);
         assert!(config.profiles.is_empty());
-        assert_eq!(config.doc_target.as_deref(), Some(DEFAULT_DOC_TARGET));
+        assert!(!project.is_initialized());
     }
 
     #[test]
-    fn read_config_reports_missing_file() {
-        let dir = TempDir::new("config-missing");
-        let err = read_config(&dir.path().join(CONFIG_NAME)).unwrap_err();
-        assert!(err.contains("mtrim init"), "应提示先执行 init：{err}");
-    }
-
-    #[test]
-    fn read_config_reports_syntax_error() {
-        let dir = TempDir::new("config-syntax");
-        let path = dir.write(CONFIG_NAME, r#"mode = "#);
-        let err = read_config(&path).unwrap_err();
-        assert!(err.contains("语法错误"), "应报告 TOML 语法错误：{err}");
-    }
-
-    #[test]
-    fn read_config_applies_defaults() {
-        let dir = TempDir::new("config-defaults");
-        let path = dir.write(
-            CONFIG_NAME,
-            r#"[profiles.only-mode]
-mode = "black"
-"#,
+    fn user_profiles_override_same_name_system_profile() {
+        let dir = TempDir::new("config-profile-merge");
+        write(
+            &dir,
+            ".mono-trim/config.toml",
+            "version = \"0.1.0\"\n\n[profiles.dev]\nmode = \"black\"\ndesc = \"系统\"\ntargets = [\"a/\"]\n",
         );
-        let config = read_config(&path).unwrap();
-        let profile = config.profiles.get("only-mode").unwrap();
+        write(
+            &dir,
+            "mono-trim.toml",
+            "[profiles.dev]\nmode = \"white\"\ndesc = \"用户\"\ntargets = [\"b/\"]\n",
+        );
 
-        assert_eq!(profile.mode, "black");
-        assert!(profile.desc.is_empty(), "desc 应默认为空");
-        assert!(profile.targets.is_empty(), "targets 应默认为空");
-        assert!(config.doc_target.is_none(), "doc_target 应可缺省");
+        let config = Project::from_root(dir.path()).load().unwrap();
+
+        assert_eq!(config.profiles["dev"].mode, "white");
+        assert_eq!(config.profiles["dev"].desc, "用户");
     }
 
     #[test]
-    fn sorted_profiles_orders_by_name() {
-        let dir = TempDir::new("config-sorted");
-        let path = dir.write(
-            CONFIG_NAME,
-            r#"[profiles.zeta]
-mode = "black"
+    fn reports_syntax_errors_with_file_name() {
+        let dir = TempDir::new("config-broken");
+        write(&dir, "mono-trim.toml", "mode = ");
 
-[profiles.alpha]
-mode = "white"
+        let err = Project::from_root(dir.path()).load().unwrap_err();
 
-[profiles.mid]
-mode = "black"
-"#,
+        assert!(err.contains("mono-trim.toml"), "{err}");
+        assert!(err.contains("语法错误"), "{err}");
+    }
+
+    #[test]
+    fn system_config_is_rewritten_but_user_config_is_kept() {
+        let dir = TempDir::new("config-write");
+        write(
+            &dir,
+            "mono-trim.toml",
+            "[profiles.keep]\nmode = \"black\"\ntargets = []\n",
         );
-        let config = read_config(&path).unwrap();
-        let names: Vec<&str> = sorted_profiles(&config)
-            .into_iter()
-            .map(|name| name.as_str())
-            .collect();
+        let project = Project::from_root(dir.path());
 
-        assert_eq!(names, ["alpha", "mid", "zeta"]);
+        project.write_system_config("9.9.9").unwrap();
+        project.ensure_user_config().unwrap();
+
+        assert_eq!(
+            project.load_system().unwrap().version.as_deref(),
+            Some("9.9.9")
+        );
+        assert!(dir.read("mono-trim.toml").contains("profiles.keep"));
+    }
+
+    #[test]
+    fn version_hint_points_to_upgrade_or_update() {
+        let dir = TempDir::new("config-hint");
+        write(&dir, ".mono-trim/config.toml", "version = \"99.0.0\"\n");
+        let newer = Project::from_root(dir.path()).load().unwrap();
+        assert!(newer.version_hint().unwrap().contains("建议升级系统 CLI"));
+
+        write(&dir, ".mono-trim/config.toml", "version = \"0.0.1\"\n");
+        let older = Project::from_root(dir.path()).load().unwrap();
+        assert!(older.version_hint().unwrap().contains("mtrim update"));
     }
 }

@@ -1,12 +1,13 @@
-//! `doctor`：配置语法、字段合法性与物理路径有效性自检。
+//! `doctor`：只校验系统配置与用户配置的合法性。
 
 use std::fs;
 use std::path::Path;
 
 use crate::Result;
 use crate::cli;
-use crate::config::{self, Config};
+use crate::config::{self, Config, Project, SystemConfig, UserConfig};
 use crate::sparse::normalize_target;
+use crate::version;
 
 /// 检查项的严重级别
 #[derive(Debug, PartialEq, Eq)]
@@ -36,22 +37,58 @@ fn warn(message: String) -> Finding {
     }
 }
 
-pub fn run(config_path: &Path) -> Result<()> {
-    println!("🔍 正在检查 {} ...", config::display_path());
-    let config = config::read_config(config_path)?;
-    // targets 相对项目根目录解析，支持在子目录中调用
-    let root = config::project_root_of(config_path);
+pub fn run(project: &Project) -> Result<()> {
+    let has_system = project.is_initialized();
+    let has_user = project.user_config().exists();
+    if !has_system && !has_user {
+        return Err(format!(
+            "未发现配置文件，请先运行 mtrim init（预期位置：{}、{}）",
+            project.system_config_display(),
+            project.user_config_display()
+        ));
+    }
 
     println!(
-        "ℹ️ 内置保留命令：{}（profiles 不可同名）。",
-        cli::reserved_commands().collect::<Vec<_>>().join(" / ")
+        "🔍 正在检查 {} 与 {} ...",
+        project.system_config_display(),
+        project.user_config_display()
     );
-    if config.profiles.is_empty() {
-        println!("ℹ️ 尚未配置任何 profiles，当前仅可使用内置命令。");
+
+    let mut findings = Vec::new();
+    let mut system = None;
+    let mut user = None;
+
+    if has_system {
+        match config::read_system(&project.system_config()) {
+            Ok(parsed) => {
+                findings.extend(inspect_system(&parsed));
+                system = Some(parsed);
+            }
+            Err(e) => findings.push(error(e)),
+        }
+    } else {
+        findings.push(warn(format!(
+            "缺少系统配置 {}，可运行 mtrim init 生成",
+            project.system_config_display()
+        )));
+    }
+
+    if has_user {
+        match config::read_user(&project.user_config()) {
+            Ok(parsed) => {
+                findings.extend(inspect_user(&parsed));
+                user = Some(parsed);
+            }
+            Err(e) => findings.push(error(e)),
+        }
+    }
+
+    if let (Some(system), Some(user)) = (&system, &user) {
+        findings.extend(inspect_profiles(&merge(system, user), project.root()));
     }
 
     let mut checker = Checker::default();
-    for finding in inspect(&config, root) {
+    for finding in findings {
         match finding.level {
             Level::Error => checker.error(finding.message),
             Level::Warn => checker.warn(finding.message),
@@ -60,14 +97,71 @@ pub fn run(config_path: &Path) -> Result<()> {
     checker.finish()
 }
 
-/// 逐项检查配置，返回全部结论（纯逻辑，便于单测）
-fn inspect(config: &Config, root: &Path) -> Vec<Finding> {
+fn merge(system: &SystemConfig, user: &UserConfig) -> Config {
+    let mut profiles = system.profiles.clone();
+    profiles.extend(user.profiles.clone());
+    Config {
+        version: system.version.clone().unwrap_or_default(),
+        doc_target: user
+            .doc_target
+            .clone()
+            .or_else(|| system.doc_target.clone())
+            .unwrap_or_else(|| config::DEFAULT_DOC_TARGET.to_string()),
+        profiles,
+    }
+}
+
+fn inspect_system(system: &SystemConfig) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    for name in config::sorted_profiles(config) {
-        let profile = &config.profiles[name];
+    match system.version.as_deref() {
+        Some(value) if version::is_valid(value) => {}
+        Some(value) => findings.push(error(format!(
+            "系统配置 version = \"{value}\" 不是合法的 x.y.z 版本号。"
+        ))),
+        None => findings.push(error("系统配置缺少 version 字段。".into())),
+    }
 
-        // 与内置命令重名 / 含空白等命名会被命令路由抢走，必须提前拦住
+    if let Some(doc_target) = system.doc_target.as_deref() {
+        findings.extend(inspect_doc_target(doc_target, "系统配置"));
+    }
+
+    findings.extend(inspect_profile_entries(&system.profiles));
+    findings
+}
+
+fn inspect_user(user: &UserConfig) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    if let Some(doc_target) = user.doc_target.as_deref() {
+        findings.extend(inspect_doc_target(doc_target, "用户配置"));
+    }
+    findings.extend(inspect_profile_entries(&user.profiles));
+    findings
+}
+
+fn inspect_doc_target(doc_target: &str, label: &str) -> Vec<Finding> {
+    if doc_target.trim().is_empty() {
+        return vec![error(format!("{label} doc_target 为空。"))];
+    }
+    // Windows 上 "/abs" 不算 is_absolute，这里统一按"以分隔符开头"处理
+    let absolute_like = Path::new(doc_target).is_absolute()
+        || doc_target.starts_with('/')
+        || doc_target.starts_with('\\');
+    if absolute_like {
+        return vec![error(format!(
+            "{label} doc_target '{doc_target}' 必须是相对项目根目录的路径。"
+        ))];
+    }
+    Vec::new()
+}
+
+fn inspect_profile_entries(
+    profiles: &std::collections::HashMap<String, config::Profile>,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for (name, profile) in profiles {
         if let Err(message) = cli::validate_profile_name(name) {
             findings.push(error(message));
         }
@@ -79,7 +173,7 @@ fn inspect(config: &Config, root: &Path) -> Vec<Finding> {
         }
         if profile.desc.trim().is_empty() {
             findings.push(warn(format!(
-                "[{name}] 缺少 desc 描述，导出的文档表格会留空。"
+                "[{name}] 缺少 desc 描述，mtrim ls / doc 会留空。"
             )));
         }
         if profile.targets.is_empty() {
@@ -87,15 +181,25 @@ fn inspect(config: &Config, root: &Path) -> Vec<Finding> {
                 "[{name}] targets 为空，执行时不会裁剪任何内容。"
             )));
         }
-
         for target in &profile.targets {
-            // 复用规则生成时的归一化结果，避免两处各自处理前缀
-            let normalized = match normalize_target(target) {
-                Ok(path) => path,
-                Err(message) => {
-                    findings.push(error(format!("[{name}] {message}")));
-                    continue;
-                }
+            if let Err(message) = normalize_target(target) {
+                findings.push(error(format!("[{name}] {message}")));
+            }
+        }
+    }
+
+    findings
+}
+
+/// 合并后检查路径是否真实存在、目录斜杠规则是否正确
+fn inspect_profiles(config: &Config, root: &Path) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for name in config.sorted_profile_names() {
+        let profile = &config.profiles[name];
+        for target in &profile.targets {
+            let Ok(normalized) = normalize_target(target) else {
+                continue;
             };
 
             match fs::symlink_metadata(root.join(normalized.trim_start_matches('/'))) {
@@ -145,9 +249,9 @@ impl Checker {
             ));
         }
         if self.warnings > 0 {
-            println!("⚠️ 配置文件语法合法，但存在 {} 处警告。", self.warnings);
+            println!("⚠️ 配置合法，但存在 {} 处警告。", self.warnings);
         } else {
-            println!("✅ 配置文件健康检查通过。");
+            println!("✅ 配置检查通过。");
         }
         Ok(())
     }
@@ -156,10 +260,10 @@ impl Checker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{TempDir, write_config};
+    use crate::test_support::TempDir;
 
-    fn config_from(body: &str) -> Config {
-        toml::from_str(body).unwrap()
+    fn project(dir: &TempDir) -> Project {
+        Project::from_root(dir.path())
     }
 
     fn messages(findings: &[Finding], level: Level) -> Vec<&str> {
@@ -174,19 +278,20 @@ mod tests {
     fn checker_treats_warnings_as_ok_and_errors_as_failure() {
         let mut checker = Checker::default();
         checker.warn("警告".to_string());
-        assert!(checker.finish().is_ok(), "仅警告不应导致检查失败");
+        assert!(checker.finish().is_ok());
 
         let mut checker = Checker::default();
         checker.error("错误".to_string());
-        let err = checker.finish().unwrap_err();
-        assert!(err.contains("1 处错误"), "{err}");
+        assert!(checker.finish().unwrap_err().contains("1 处错误"));
     }
 
     #[test]
-    fn healthy_config_produces_no_findings() {
+    fn healthy_configs_produce_no_findings() {
         let dir = TempDir::new("doctor-ok");
         dir.write("apps/ios/keep.txt", "x");
-        let config = config_from(
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
             r#"[profiles.win-dev]
 mode = "black"
 desc = "隐藏 iOS 壳"
@@ -194,116 +299,92 @@ targets = ["apps/ios/"]
 "#,
         );
 
-        assert!(inspect(&config, dir.path()).is_empty());
+        run(&project(&dir)).unwrap();
     }
 
     #[test]
-    fn rejects_profile_names_that_cannot_be_invoked() {
-        let dir = TempDir::new("doctor-name");
-        let config = config_from(
-            r#"[profiles.reset]
-mode = "black"
-desc = "占用内置命令"
-targets = []
-"#,
+    fn reports_invalid_version() {
+        let dir = TempDir::new("doctor-version");
+        dir.write(".mono-trim/config.toml", "version = \"abc\"\n");
+
+        let err = run(&project(&dir)).unwrap_err();
+
+        assert!(err.contains("1 处错误"), "{err}");
+    }
+
+    #[test]
+    fn reports_reserved_profile_name() {
+        let dir = TempDir::new("doctor-reserved");
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
+            "[profiles.init]\nmode = \"black\"\ndesc = \"x\"\n",
         );
 
-        let findings = inspect(&config, dir.path());
-        let errors = messages(&findings, Level::Error);
-        assert_eq!(errors.len(), 1, "{findings:?}");
-        assert!(errors[0].contains("内置命令重名"), "{errors:?}");
+        let err = run(&project(&dir)).unwrap_err();
+
+        assert!(err.contains("处错误"), "{err}");
     }
 
     #[test]
-    fn rejects_unknown_mode_and_unsafe_targets() {
+    fn reports_syntax_error_and_unsafe_targets() {
         let dir = TempDir::new("doctor-bad");
-        let config = config_from(
-            r#"[profiles.bad]
-mode = "gray"
-desc = ""
-targets = [".git/config", "../outside"]
-"#,
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
+            "[profiles.bad]\nmode = \"gray\"\ndesc = \"\"\ntargets = [\".git/config\", \"../outside\"]\n",
         );
 
-        let findings = inspect(&config, dir.path());
-        let errors = messages(&findings, Level::Error);
+        let err = run(&project(&dir)).unwrap_err();
 
-        assert_eq!(errors.len(), 3, "{findings:?}");
-        assert!(errors.iter().any(|m| m.contains("mode")), "{errors:?}");
-        assert!(errors.iter().any(|m| m.contains(".git")), "{errors:?}");
-        assert!(errors.iter().any(|m| m.contains("..")), "{errors:?}");
-        assert!(
-            messages(&findings, Level::Warn)
-                .iter()
-                .any(|m| m.contains("desc")),
-            "缺少 desc 应给出警告：{findings:?}"
-        );
+        assert!(err.contains("3 处错误"), "{err}");
     }
 
     #[test]
-    fn warns_about_missing_paths_but_stays_ok() {
+    fn reports_toml_syntax_error_with_file_name() {
+        let dir = TempDir::new("doctor-syntax");
+        dir.write(".mono-trim/config.toml", "version = ");
+        dir.write(
+            "mono-trim.toml",
+            "[profiles.ok]\nmode = \"black\"\ndesc = \"x\"\n",
+        );
+
+        let err = run(&project(&dir)).unwrap_err();
+
+        assert!(err.contains("检查未通过"), "{err}");
+    }
+
+    #[test]
+    fn warns_when_target_missing() {
         let dir = TempDir::new("doctor-missing");
-        let config = config_from(
-            r#"[profiles.p]
-mode = "black"
-desc = "拼写错误"
-targets = ["nope/"]
-"#,
+        dir.write(".mono-trim/config.toml", "version = \"0.1.0\"\n");
+        dir.write(
+            "mono-trim.toml",
+            "[profiles.p]\nmode = \"black\"\ndesc = \"拼写错误\"\ntargets = [\"nope/\"]\n",
         );
 
-        let findings = inspect(&config, dir.path());
-        assert!(messages(&findings, Level::Error).is_empty());
-        assert!(
-            messages(&findings, Level::Warn)
-                .iter()
-                .any(|m| m.contains("不存在")),
-            "{findings:?}"
-        );
+        run(&project(&dir)).expect("仅有警告时应通过");
     }
 
     #[test]
-    fn warns_when_directory_lacks_trailing_slash() {
-        let dir = TempDir::new("doctor-slash");
-        dir.write("apps/ios/keep.txt", "x");
-        let config = config_from(
-            r#"[profiles.p]
-mode = "black"
-desc = "目录少了斜杠"
-targets = ["apps/ios"]
-"#,
-        );
-
-        let findings = inspect(&config, dir.path());
-        assert!(
-            messages(&findings, Level::Warn)
-                .iter()
-                .any(|m| m.contains("'/' 结尾")),
-            "{findings:?}"
-        );
+    fn fails_when_no_config_files_exist() {
+        let dir = TempDir::new("doctor-none");
+        assert!(run(&project(&dir)).is_err());
     }
 
     #[test]
-    fn run_reports_summary_and_status() {
-        let dir = TempDir::new("doctor-run");
-        let ok_path = write_config(
-            &dir,
-            r#"[profiles.win-dev]
-mode = "black"
-desc = "正常"
-targets = []
-"#,
-        );
-        assert!(run(&ok_path).is_ok(), "仅有警告时应通过");
+    fn inspect_helpers_are_pure() {
+        let system = SystemConfig {
+            version: Some("0.1.0".into()),
+            doc_target: Some("README.md".into()),
+            profiles: Default::default(),
+        };
+        assert!(inspect_system(&system).is_empty());
 
-        let bad_path = write_config(
-            &dir,
-            r#"[profiles.reset]
-mode = "gray"
-desc = "非法"
-targets = []
-"#,
-        );
-        let err = run(&bad_path).unwrap_err();
-        assert!(err.contains("2 处错误"), "{err}");
+        let user = UserConfig {
+            doc_target: Some("/abs/path.md".into()),
+            profiles: Default::default(),
+        };
+        assert_eq!(messages(&inspect_user(&user), Level::Error).len(), 1);
     }
 }

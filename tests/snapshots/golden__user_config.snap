@@ -1,0 +1,14 @@
+---
+source: tests/golden.rs
+expression: dir.read(USER_CONFIG)
+---
+# 用户配置：只写需要覆盖或新增的内容
+#
+# 自定义裁剪命令：
+#   [profiles.命令名]
+#   mode = "black"   # black：保留全部，排除 targets；white：仅保留 targets
+#   desc = "命令说明（mtrim ls / doc 会展示）"
+#   targets = ["apps/ios/", "assets/large_video.mp4"]
+#
+# 覆盖系统默认的文档输出位置（相对项目根目录）：
+# doc_target = "docs/commands.md"
