@@ -33,6 +33,38 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Lint install.sh
+        shell: bash
+        run: bash -n scripts/install.sh
+
+      - name: Lint & smoke test install.ps1 (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | Out-String | Write-Error; exit 1 }
+          ./scripts/install.ps1 -DryRun -Dir "$env:RUNNER_TEMP\mtrim" -NoPath
+          cmd /c "scripts\install.cmd -DryRun -NoPath -Dir %RUNNER_TEMP%\mtrim-cmd"
+
+      - name: Smoke test install.sh (macOS: sh/bash/zsh)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sh -n scripts/install.sh && bash -n scripts/install.sh && zsh -n scripts/install.sh
+          sh scripts/install.sh --dry-run
+          bash scripts/install.sh --dry-run
+          zsh scripts/install.sh --dry-run
+
+      - name: Smoke test install.sh (Linux: sh/bash)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sh -n scripts/install.sh && bash -n scripts/install.sh
+          sh scripts/install.sh --dry-run
+          bash scripts/install.sh --dry-run
+
       - name: Test
         run: cargo test --all-targets
 

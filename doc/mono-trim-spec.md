@@ -129,30 +129,83 @@ $ mtrim show
 
 ## 📦 安装
 
-> 发布流水线（GitHub Releases）尚未落地，以下为约定方案。
+`mtrim` 只装在开发者的机器上，项目里不需要安装任何东西。
 
-**方式一：安装脚本（推荐）** —— 从 Release 下载当前平台产物并放入 PATH。
+### 方式一：安装脚本（推荐）
 
-**方式二：从源码安装**
+脚本会从 GitHub Release 下载当前平台产物、校验 sha256、安装到用户目录并加入 PATH。
+
+**Windows（PowerShell）**
+
+```powershell
+# 直接运行仓库内的脚本
+git clone https://github.com/gmi91dev/mono-trim.git
+.\mono-trim\scripts\install.ps1
+
+# 安装指定版本 / 自定义目录
+.\scripts\install.ps1 -Version 0.0.1 -Dir D:\tools\mtrim
+
+# PowerShell 7 同样可用（兼容 Windows PowerShell 5.1 与 pwsh 7+，非 Windows 的 pwsh 请改用 install.sh）
+pwsh -File scripts\install.ps1 -DryRun
+```
+
+**Windows（cmd.exe）**
+
+```bat
+:: cmd 包装器会自动选择 pwsh 或 Windows PowerShell
+scripts\install.cmd
+
+:: 透传参数
+scripts\install.cmd -Version 0.0.1 -Dir D:	ools\mtrim
+```
+
+**macOS / Linux**
 
 ```bash
-cargo install --path .        # 本仓库
-# 或
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash
+# 或安装指定版本
+curl -fsSL .../scripts/install.sh | bash -s -- --version 0.0.1
+```
+
+脚本参数：`--version <版本>`、`--dir <目录>`、`--force`（同版本也重装）、`--dry-run`（只打印动作）。
+
+支持范围：Windows 的 cmd / Windows PowerShell 5.1 / PowerShell 7+；macOS 与 Linux 的 sh / bash / zsh（脚本按 POSIX 编写）。
+环境变量 `MONO_TRIM_MIRROR` 可替换下载源（内网镜像）。
+
+### 方式二：从源码安装
+
+```bash
+cargo install --path .        # 当前仓库
 cargo install --git https://github.com/gmi91dev/mono-trim.git
 ```
 
-**新设备上手**
+### 新设备上手
 
 ```bash
 git clone <repo> && cd <repo>
 mtrim doctor        # 校验配置
-mtrim ls            # 看看有哪些裁剪命令
+mtrim ls            # 查看可用裁剪命令
 mtrim win-dev       # 执行自定义裁剪
 ```
 
-因为项目里不存放二进制，克隆后不需要任何"安装到项目"的步骤，只要本机有 `mtrim` 即可。
+### 升级
 
----
+- 系统 CLI：`mtrim update`（自动检查 Release 并替换自身），或重跑安装脚本；
+- 项目配置版本：`mtrim update` 会在项目内同步 `.mono-trim/config.toml`（无变化时不写文件）。
+
+### 发布（维护者）
+
+1. 修改 `Cargo.toml` 的 `version`；
+2. 打 tag 并推送：`git tag v0.0.1 && git push origin v0.1.0`；
+3. `.github/workflows/release.yml` 会构建四个产物并附上 `sha256sums.txt`：
+
+```text
+mtrim-win-x86_64.exe
+mtrim-linux-x86_64
+mtrim-macos-x86_64
+mtrim-macos-aarch64
+sha256sums.txt
+```
 
 ## 🧪 开发与测试
 

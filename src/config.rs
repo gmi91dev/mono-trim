@@ -336,7 +336,7 @@ mod tests {
         let newer = Project::from_root(dir.path()).load().unwrap();
         assert!(newer.version_hint().unwrap().contains("建议升级系统 CLI"));
 
-        write(&dir, ".mono-trim/config.toml", "version = \"0.0.1\"\n");
+        write(&dir, ".mono-trim/config.toml", "version = \"0.0.0\"\n");
         let older = Project::from_root(dir.path()).load().unwrap();
         assert!(older.version_hint().unwrap().contains("mtrim update"));
     }
