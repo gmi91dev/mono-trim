@@ -11,7 +11,9 @@ fn help_lists_all_builtin_commands() {
 
     assert_eq!(exit_code(&output), Some(0));
     let text = stdout(&output);
-    for command in ["init", "update", "doctor", "ls", "show", "doc", "applyall"] {
+    for command in [
+        "init", "clone", "update", "doctor", "ls", "show", "doc", "applyall",
+    ] {
         assert!(text.contains(command), "帮助应列出 {command}：\n{text}");
     }
 }
@@ -129,7 +131,9 @@ fn ls_lists_user_commands_and_all_includes_builtins() {
 
     let all = mtrim(dir.path(), &["ls", "-a"]);
     let text = stdout(&all);
-    for command in ["init", "update", "doctor", "ls", "show", "doc", "applyall"] {
+    for command in [
+        "init", "clone", "update", "doctor", "ls", "show", "doc", "applyall",
+    ] {
         assert!(text.contains(command), "ls -a 应列出 {command}：{text}");
     }
 }

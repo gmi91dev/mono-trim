@@ -105,7 +105,6 @@ impl Project {
         }
     }
 
-    #[cfg(test)]
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }

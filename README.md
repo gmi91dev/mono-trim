@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 指定版本或目录（`iex` 无法传参，改用脚本块）：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.3 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.4 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.3
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.4
 ```
 
 ### 安装脚本参数
@@ -75,7 +75,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.3
+./mono-trim/scripts/install.sh --version 0.0.4
 ```
 
 ### 从源码
@@ -138,6 +138,7 @@ targets = ["rust/", "Makefile", "Cargo.toml"]
 | 命令 | 作用 |
 | :--- | :--- |
 | `mtrim init` | 用内置默认值初始化项目配置（系统配置会重写，用户配置只在缺失时创建） |
+| `mtrim clone <仓库> [目录] [-p <命令>]` | 克隆仓库时**只检出 mono-trim 配置文件**，其余文件按 profile 再拉取 |
 | `mtrim update` | 升级系统 CLI；并把项目配置版本同步到当前 CLI（无变化不写文件） |
 | `mtrim doctor` | 校验系统配置与用户配置的合法性 |
 | `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
@@ -145,6 +146,28 @@ targets = ["rust/", "Makefile", "Cargo.toml"]
 | `mtrim doc` | 把命令速查表写入 `doc_target`（可重复执行，原地更新） |
 | `mtrim applyall` | 恢复项目为全量工作空间（不需要配置文件） |
 | `mtrim <名称>` | 执行用户配置中的 profile |
+
+## 只拉取配置（可选）
+
+如果不想先克隆整个仓库，可以让 `mtrim` 先只取回两份配置文件：
+
+```bash
+mtrim clone https://github.com/<owner>/<repo>.git
+cd <repo>
+mtrim ls          # 看看可用的裁剪命令
+mtrim win-dev     # 按 profile 拉取需要的文件
+```
+
+克隆后立即应用某个命令（一步到位）：
+
+```bash
+mtrim clone https://github.com/<owner>/<repo>.git -p win-dev
+```
+
+- 使用 `git clone --filter=blob:none --no-checkout`，只检出 `.mono-trim/config.toml` 与 `mono-trim.toml`；
+- 执行 profile 时 git 才会按需下载对应文件（部分克隆）；
+- 默认目录名取仓库名，可用第二个参数指定；
+- 目标目录已存在且非空时会拒绝执行。
 
 ## 配置
 
@@ -185,7 +208,7 @@ cargo test --all-targets
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。
 
-发布：修改 `Cargo.toml` 版本 → `git tag v0.0.3 && git push origin v0.0.3`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
+发布：修改 `Cargo.toml` 版本 → `git tag v0.0.4 && git push origin v0.0.4`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
 
 ## License
 

@@ -8,6 +8,7 @@ Usage: mtrim [COMMAND]
 
 Commands:
   init      使用内置默认值重新初始化项目配置
+  clone     克隆仓库并只检出 mono-trim 配置文件
   update    升级系统 CLI 并同步项目配置版本
   doctor    校验系统配置与用户配置
   ls        列出可用的裁剪命令

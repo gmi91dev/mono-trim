@@ -6,12 +6,14 @@ use clap::{Arg, ArgAction, Command as ClapCommand};
 pub const COMMAND: &str = "mtrim";
 
 /// 内置子命令：属于系统保留字，`mono-trim.toml` 的 profiles 不可占用
-pub const BUILTIN_COMMANDS: [&str; 7] =
-    ["init", "update", "doctor", "ls", "show", "doc", "applyall"];
+pub const BUILTIN_COMMANDS: [&str; 8] = [
+    "init", "clone", "update", "doctor", "ls", "show", "doc", "applyall",
+];
 
 /// 内置命令说明，供 `ls -a` 与文档输出
-pub const BUILTIN_DESCRIPTIONS: [(&str, &str); 7] = [
+pub const BUILTIN_DESCRIPTIONS: [(&str, &str); 8] = [
     ("init", "使用内置默认值重新初始化项目配置"),
+    ("clone", "克隆仓库并只检出 mono-trim 配置文件"),
     ("update", "升级系统 CLI 并同步项目配置版本"),
     ("doctor", "校验系统配置与用户配置"),
     ("ls", "列出可用的裁剪命令"),
@@ -66,6 +68,23 @@ pub fn build() -> ClapCommand {
         .version(crate::config::current_version())
         .about("高内聚、零污染的项目级多平台工作空间裁剪引擎")
         .subcommand(ClapCommand::new("init").about(description("init")))
+        .subcommand(
+            ClapCommand::new("clone")
+                .about(description("clone"))
+                .arg(
+                    Arg::new("repository")
+                        .required(true)
+                        .help("仓库地址（支持 https / ssh / 本地路径）"),
+                )
+                .arg(Arg::new("directory").help("目标目录，默认取仓库名"))
+                .arg(
+                    Arg::new("profile")
+                        .short('p')
+                        .long("profile")
+                        .num_args(1)
+                        .help("克隆后立即应用的 profile"),
+                ),
+        )
         .subcommand(ClapCommand::new("update").about(description("update")))
         .subcommand(ClapCommand::new("doctor").about(description("doctor")))
         .subcommand(

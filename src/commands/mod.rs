@@ -1,6 +1,7 @@
 //! 子命令实现与统一调度。
 
 pub mod apply;
+pub mod clone;
 pub mod doc;
 pub mod doctor;
 pub mod init;
@@ -20,6 +21,13 @@ pub fn dispatch(matches: ArgMatches) -> Result<()> {
 
     match matches.subcommand() {
         Some(("init", _)) => init::run(&project),
+        Some(("clone", sub)) => clone::run(
+            sub.get_one::<String>("repository")
+                .map(String::as_str)
+                .unwrap_or_default(),
+            sub.get_one::<String>("directory").map(String::as_str),
+            sub.get_one::<String>("profile").map(String::as_str),
+        ),
         Some(("update", _)) => update::run(&project, &GithubFetcher, &SelfReplacer),
         Some(("doctor", _)) => doctor::run(&project),
         Some(("ls", sub_matches)) => ls::run(&project, sub_matches.get_flag("all")),

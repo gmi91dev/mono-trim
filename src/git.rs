@@ -3,7 +3,7 @@
 //! 具体执行通过 [`GitRunner`] 抽象，生产环境用 [`SystemGit`]，
 //! 测试可注入假实现，从而无需真实仓库也能验证命令编排。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
@@ -93,6 +93,33 @@ pub fn ensure_repo(git: &dyn GitRunner) -> Result<()> {
         Ok(flag) if flag == "true" => Ok(()),
         _ => Err("当前目录不是一个 Git 仓库，请前往项目根目录运行。".into()),
     }
+}
+
+/// 在指定目录执行 git（等价于 `git -C <dir> ...`）
+pub fn git_ok_in(git: &dyn GitRunner, dir: &Path, args: &[&str]) -> Result<()> {
+    let dir = dir.to_string_lossy().into_owned();
+    let mut all: Vec<&str> = vec!["-C", &dir];
+    all.extend_from_slice(args);
+    git_ok(git, &all)
+}
+
+/// 在指定目录执行 git 并返回 trimmed stdout
+fn stdout_in(git: &dyn GitRunner, dir: &Path, args: &[&str]) -> Result<String> {
+    let dir = dir.to_string_lossy().into_owned();
+    let mut all: Vec<&str> = vec!["-C", &dir];
+    all.extend_from_slice(args);
+    stdout(git, &all)
+}
+
+/// 解析 `dir` 仓库内的 git 路径（返回绝对路径）
+pub fn git_path_in(git: &dyn GitRunner, dir: &Path, path: &str) -> Result<PathBuf> {
+    let raw = stdout_in(git, dir, &["rev-parse", "--git-path", path])?;
+    let path = PathBuf::from(raw);
+    Ok(if path.is_absolute() {
+        path
+    } else {
+        dir.join(path)
+    })
 }
 
 /// 兼容 worktree / 子目录调用，由 Git 自己给出 sparse-checkout 文件位置
