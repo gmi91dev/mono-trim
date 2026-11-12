@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn asset_name() -> String {
@@ -32,10 +33,12 @@ fn sha256_hex(path: &Path) -> String {
         .collect()
 }
 
-/// 启动最小静态文件服务器（只处理 GET），返回 base URL
-fn serve(root: PathBuf) -> String {
+/// 极简静态文件服务器，并记录被请求的路径
+fn serve(root: PathBuf) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&requests);
 
     thread::spawn(move || {
         for stream in listener.incoming() {
@@ -50,6 +53,7 @@ fn serve(root: PathBuf) -> String {
                 .unwrap_or("/")
                 .trim_start_matches('/')
                 .to_string();
+            recorded.lock().unwrap().push(target.clone());
 
             match fs::read(root.join(target)) {
                 Ok(body) => {
@@ -69,25 +73,51 @@ fn serve(root: PathBuf) -> String {
         }
     });
 
-    format!("http://{addr}")
+    (format!("http://{addr}"), requests)
 }
 
-/// 生成 `mirror/releases/latest/download/` 目录；checksum 为 None 时使用真实校验和
-fn build_release(dir: &TempDir, checksum: Option<&str>) -> PathBuf {
+struct ReleaseOptions {
+    /// `version.txt` 的内容；None 表示不提供该文件
+    version: Option<String>,
+    /// 校验和是否故意写错
+    bad_checksum: bool,
+    /// 是否提供二进制产物
+    include_asset: bool,
+}
+
+impl Default for ReleaseOptions {
+    fn default() -> Self {
+        Self {
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            bad_checksum: false,
+            include_asset: true,
+        }
+    }
+}
+
+fn build_release(dir: &TempDir, options: ReleaseOptions) -> PathBuf {
     let root = dir.path().join("mirror");
     let download = root.join("releases/latest/download");
     fs::create_dir_all(&download).unwrap();
 
-    let asset = asset_name();
-    fs::copy(BIN, download.join(&asset)).unwrap();
-    let hash = checksum
-        .map(str::to_string)
-        .unwrap_or_else(|| sha256_hex(&download.join(&asset)));
-    fs::write(
-        download.join("sha256sums.txt"),
-        format!("{hash}  {asset}\n"),
-    )
-    .unwrap();
+    if let Some(version) = options.version {
+        fs::write(download.join("version.txt"), format!("{version}\n")).unwrap();
+    }
+
+    if options.include_asset {
+        let asset = asset_name();
+        fs::copy(BIN, download.join(&asset)).unwrap();
+        let hash = if options.bad_checksum {
+            "0".repeat(64)
+        } else {
+            sha256_hex(&download.join(&asset))
+        };
+        fs::write(
+            download.join("sha256sums.txt"),
+            format!("{hash}  {asset}\n"),
+        )
+        .unwrap();
+    }
 
     root
 }
@@ -101,48 +131,104 @@ fn run_update(dir: &TempDir, base: &str) -> Output {
         .expect("执行 mtrim update 失败")
 }
 
+fn requests_contain(requests: &Arc<Mutex<Vec<String>>>, needle: &str) -> bool {
+    requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|path| path.contains(needle))
+}
+
 #[test]
-fn update_downloads_and_verifies_release() {
-    let dir = TempDir::new("update-verify");
+fn updates_do_not_download_assets_when_already_latest() {
+    let dir = TempDir::new("update-latest");
     assert!(mtrim(dir.path(), &["init"]).status.success());
-    let base = serve(build_release(&dir, None));
+    let (base, requests) = serve(build_release(&dir, ReleaseOptions::default()));
 
     let output = run_update(&dir, &base);
 
     assert_eq!(exit_code(&output), Some(0), "{}", stderr(&output));
-    let text = stdout(&output);
-    assert!(!text.contains("校验失败"), "{text}");
-    assert!(text.contains("已是最新"), "应识别出与当前版本相同：{text}");
-}
-
-#[test]
-fn update_rejects_bad_checksum() {
-    let dir = TempDir::new("update-bad-sum");
-    assert!(mtrim(dir.path(), &["init"]).status.success());
-    let base = serve(build_release(&dir, Some(&"0".repeat(64))));
-
-    let output = run_update(&dir, &base);
-
-    let text = stdout(&output);
-    assert!(text.contains("sha256 校验失败"), "{text}");
-    assert_eq!(
-        exit_code(&output),
-        Some(0),
-        "校验失败只应告警，不应中断项目配置同步"
+    assert!(stdout(&output).contains("已是最新"));
+    assert!(requests_contain(&requests, "version.txt"), "应查询版本文件");
+    assert!(
+        !requests_contain(&requests, &asset_name()),
+        "已是最新时不应下载二进制：{:?}",
+        requests.lock().unwrap()
     );
 }
 
 #[test]
-fn update_reports_download_failure() {
-    let dir = TempDir::new("update-404");
+fn update_rejects_bad_checksum_before_replacing() {
+    let dir = TempDir::new("update-bad-sum");
     assert!(mtrim(dir.path(), &["init"]).status.success());
-    let empty = dir.path().join("empty-mirror");
-    fs::create_dir_all(&empty).unwrap();
-    let base = serve(empty);
+    let (base, requests) = serve(build_release(
+        &dir,
+        ReleaseOptions {
+            version: Some("99.0.0".to_string()),
+            bad_checksum: true,
+            include_asset: true,
+        },
+    ));
+
+    let output = run_update(&dir, &base);
+
+    assert!(
+        requests_contain(&requests, &asset_name()),
+        "发现新版本时应下载"
+    );
+    let text = stdout(&output);
+    assert!(text.contains("sha256 校验失败"), "{text}");
+    assert_eq!(exit_code(&output), Some(0), "校验失败只应告警");
+}
+
+#[test]
+fn update_reports_missing_version_file() {
+    let dir = TempDir::new("update-no-version");
+    assert!(mtrim(dir.path(), &["init"]).status.success());
+    let (base, requests) = serve(build_release(
+        &dir,
+        ReleaseOptions {
+            version: None,
+            ..ReleaseOptions::default()
+        },
+    ));
 
     let output = run_update(&dir, &base);
 
     assert_eq!(exit_code(&output), Some(0));
-    let text = stdout(&output);
-    assert!(text.contains("检查系统 CLI 更新失败"), "{text}");
+    assert!(
+        stdout(&output).contains("检查系统 CLI 更新失败"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(
+        !requests_contain(&requests, &asset_name()),
+        "版本查询失败时不应下载"
+    );
+}
+
+#[test]
+fn update_reports_missing_asset_without_replacing() {
+    let dir = TempDir::new("update-no-asset");
+    assert!(mtrim(dir.path(), &["init"]).status.success());
+    let (base, requests) = serve(build_release(
+        &dir,
+        ReleaseOptions {
+            version: Some("99.0.0".to_string()),
+            bad_checksum: false,
+            include_asset: false,
+        },
+    ));
+
+    let output = run_update(&dir, &base);
+
+    assert_eq!(exit_code(&output), Some(0));
+    assert!(
+        stdout(&output).contains("下载新版本失败"),
+        "{}",
+        stdout(&output)
+    );
+    // 缺少产物时，先尝试下载校验和文件就会失败
+    assert!(requests_contain(&requests, "sha256sums.txt"));
+    assert!(!requests_contain(&requests, &asset_name()));
 }

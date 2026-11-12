@@ -8,7 +8,6 @@ use crate::config::{Project, current_version};
 use crate::update::{Fetcher, Replacer};
 use crate::util::{is_interactive, step};
 use crate::version;
-use std::fs;
 
 pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) -> Result<()> {
     let started = std::time::Instant::now();
@@ -16,24 +15,29 @@ pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) ->
     let mut acted = false;
     let mut cli_checked = false;
 
-    // 1) 系统 CLI
+    // 1) 系统 CLI：先查版本（不下载产物），只有更新才下载
     println!("⏳ 正在检查系统 CLI 更新（当前 {}）...", current_version());
-    match fetcher.fetch_latest() {
-        Ok(fetched) if version::is_newer(&fetched.version, current_version()) => {
+    match fetcher.latest_version() {
+        Ok(latest) if version::is_newer(&latest, current_version()) => {
             cli_checked = true;
-            replacer.replace(&fetched.binary)?;
-            println!(
-                "✅ 已升级系统 CLI：{} → {}",
-                current_version(),
-                fetched.version
-            );
-            effective = fetched.version;
-            acted = true;
+            step(&format!("发现新版本 {latest}，开始下载"));
+            match fetcher.download_latest() {
+                Ok(fetched) => {
+                    replacer.replace(&fetched.binary)?;
+                    println!(
+                        "✅ 已升级系统 CLI：{} → {}",
+                        current_version(),
+                        fetched.version
+                    );
+                    effective = fetched.version;
+                    acted = true;
+                }
+                Err(e) => println!("⚠️  下载新版本失败：{e}"),
+            }
         }
-        Ok(fetched) => {
-            // 已是最新版：丢弃下载的临时产物
-            let _ = fs::remove_file(&fetched.binary);
+        Ok(latest) => {
             cli_checked = true;
+            step(&format!("最新版本为 {latest}，无需下载"));
         }
         Err(e) => println!("⚠️  检查系统 CLI 更新失败：{e}"),
     }
@@ -75,16 +79,51 @@ mod tests {
     use super::*;
     use crate::test_support::TempDir;
     use crate::update::Fetched;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::path::{Path, PathBuf};
 
     struct FakeFetcher {
-        result: Result<Fetched>,
+        latest: Result<String>,
+        download: Result<Fetched>,
+        downloads: Cell<usize>,
+    }
+
+    impl FakeFetcher {
+        fn new(latest: &str) -> Self {
+            Self {
+                latest: Ok(latest.to_string()),
+                download: Ok(Fetched {
+                    version: latest.to_string(),
+                    binary: PathBuf::from("/tmp/mtrim-fake"),
+                }),
+                downloads: Cell::new(0),
+            }
+        }
+
+        fn failing_latest(message: &str) -> Self {
+            Self {
+                latest: Err(message.to_string()),
+                download: Ok(Fetched {
+                    version: current_version().to_string(),
+                    binary: PathBuf::from("/tmp/mtrim-fake"),
+                }),
+                downloads: Cell::new(0),
+            }
+        }
+
+        fn downloads(&self) -> usize {
+            self.downloads.get()
+        }
     }
 
     impl Fetcher for FakeFetcher {
-        fn fetch_latest(&self) -> Result<Fetched> {
-            match &self.result {
+        fn latest_version(&self) -> Result<String> {
+            self.latest.clone()
+        }
+
+        fn download_latest(&self) -> Result<Fetched> {
+            self.downloads.set(self.downloads.get() + 1);
+            match &self.download {
                 Ok(fetched) => Ok(Fetched {
                     version: fetched.version.clone(),
                     binary: fetched.binary.clone(),
@@ -110,27 +149,27 @@ mod tests {
         Project::from_root(dir.path())
     }
 
-    fn fake(version: &str) -> FakeFetcher {
-        FakeFetcher {
-            result: Ok(Fetched {
-                version: version.to_string(),
-                binary: PathBuf::from("/tmp/mtrim-fake"),
-            }),
-        }
-    }
-
     #[test]
     fn updates_cli_and_project_config_when_both_outdated() {
         let dir = TempDir::new("update-both");
-        dir.write(".mono-trim/config.toml", "version = \"0.0.1\"\n");
+        dir.write(
+            ".mono-trim/config.toml",
+            "version = \"0.0.1\"
+",
+        );
         dir.write(
             "mono-trim.toml",
-            "[profiles.keep]\nmode = \"black\"\ntargets = []\n",
+            "[profiles.keep]
+mode = \"black\"
+targets = []
+",
         );
         let replacer = FakeReplacer::default();
+        let fetcher = FakeFetcher::new("99.0.0");
 
-        run(&project(&dir), &fake("99.0.0"), &replacer).unwrap();
+        run(&project(&dir), &fetcher, &replacer).unwrap();
 
+        assert_eq!(fetcher.downloads(), 1, "有新版本时应下载一次");
         assert_eq!(replacer.replaced.borrow().len(), 1);
         assert_eq!(
             project(&dir).load_system().unwrap().version.as_deref(),
@@ -140,33 +179,50 @@ mod tests {
     }
 
     #[test]
-    fn does_nothing_when_already_latest() {
+    fn skips_download_when_already_latest() {
         let dir = TempDir::new("update-noop");
         dir.write(
             ".mono-trim/config.toml",
-            &format!("version = \"{}\"\n", current_version()),
+            &format!(
+                "version = \"{}\"
+",
+                current_version()
+            ),
         );
         let replacer = FakeReplacer::default();
+        let fetcher = FakeFetcher::new(current_version());
 
-        run(&project(&dir), &fake(current_version()), &replacer).unwrap();
+        run(&project(&dir), &fetcher, &replacer).unwrap();
 
+        assert_eq!(fetcher.downloads(), 0, "已是最新时不应下载产物");
         assert!(replacer.replaced.borrow().is_empty());
-        assert_eq!(
-            project(&dir).load_system().unwrap().version.as_deref(),
-            Some(current_version())
-        );
     }
 
     #[test]
-    fn syncs_project_config_even_if_cli_check_fails() {
+    fn skips_download_when_remote_is_older() {
+        let dir = TempDir::new("update-older");
+        let replacer = FakeReplacer::default();
+        let fetcher = FakeFetcher::new("0.0.1");
+
+        run(&project(&dir), &fetcher, &replacer).unwrap();
+
+        assert_eq!(fetcher.downloads(), 0, "远端更旧时不应下载");
+        assert!(replacer.replaced.borrow().is_empty());
+    }
+
+    #[test]
+    fn syncs_project_config_even_if_version_check_fails() {
         let dir = TempDir::new("update-offline");
-        dir.write(".mono-trim/config.toml", "version = \"0.0.1\"\n");
-        let fetcher = FakeFetcher {
-            result: Err("离线".into()),
-        };
+        dir.write(
+            ".mono-trim/config.toml",
+            "version = \"0.0.1\"
+",
+        );
+        let fetcher = FakeFetcher::failing_latest("离线");
 
         run(&project(&dir), &fetcher, &FakeReplacer::default()).unwrap();
 
+        assert_eq!(fetcher.downloads(), 0);
         assert_eq!(
             project(&dir).load_system().unwrap().version.as_deref(),
             Some(current_version())
@@ -176,11 +232,15 @@ mod tests {
     #[test]
     fn refuses_to_downgrade_project_config() {
         let dir = TempDir::new("update-newer-project");
-        dir.write(".mono-trim/config.toml", "version = \"99.0.0\"\n");
+        dir.write(
+            ".mono-trim/config.toml",
+            "version = \"99.0.0\"
+",
+        );
 
         run(
             &project(&dir),
-            &fake(current_version()),
+            &FakeFetcher::new(current_version()),
             &FakeReplacer::default(),
         )
         .unwrap();

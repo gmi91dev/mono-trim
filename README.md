@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 指定版本或目录（`iex` 无法传参，改用脚本块）：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.7 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.8 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.7
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.8
 ```
 
 ### 安装脚本参数
@@ -75,7 +75,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.7
+./mono-trim/scripts/install.sh --version 0.0.8
 ```
 
 ### 从源码
@@ -139,7 +139,7 @@ targets = ["rust/", "Makefile", "Cargo.toml"]
 | :--- | :--- |
 | `mtrim init` | 用内置默认值初始化项目配置（系统配置会重写，用户配置只在缺失时创建） |
 | `mtrim clone <仓库> [目录] [-c <命令>]` | 克隆仓库；识别其中的 mono-trim 配置，可立即执行某条命令 |
-| `mtrim update` | 升级系统 CLI；并把项目配置版本同步到当前 CLI（无变化不写文件） |
+| `mtrim update` | 升级系统 CLI（先查 `version.txt`，只有新版本才下载）；并把项目配置版本同步到当前 CLI |
 | `mtrim doctor` | 校验系统配置与用户配置的合法性（含是否被 `.gitignore` 忽略） |
 | `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
 | `mtrim show` | 打印两份配置文件的位置与是否存在 |
@@ -210,7 +210,7 @@ cargo test --all-targets
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。
 
-发布：修改 `Cargo.toml` 版本 → `git tag v0.0.7 && git push origin v0.0.7`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
+发布：修改 `Cargo.toml` 版本 → `git tag v0.0.8 && git push origin v0.0.8`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
 
 ## License
 

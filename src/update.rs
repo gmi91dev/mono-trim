@@ -20,7 +20,11 @@ pub struct Fetched {
 
 /// 获取最新版（网络实现或测试替身）
 pub trait Fetcher {
-    fn fetch_latest(&self) -> Result<Fetched>;
+    /// 只查询最新版本号（下载 `version.txt`，几百字节），不下载二进制
+    fn latest_version(&self) -> Result<String>;
+
+    /// 下载最新版二进制并校验（仅在确实需要升级时调用）
+    fn download_latest(&self) -> Result<Fetched>;
 }
 
 /// 用新产物替换当前可执行文件
@@ -83,7 +87,22 @@ fn download_file_name(asset: &str) -> String {
 pub struct GithubFetcher;
 
 impl Fetcher for GithubFetcher {
-    fn fetch_latest(&self) -> Result<Fetched> {
+    fn latest_version(&self) -> Result<String> {
+        let dest = std::env::temp_dir().join(format!("mtrim-version-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&dest);
+        download(&latest_url("version.txt"), &dest)?;
+        let text = std::fs::read_to_string(&dest).map_err(|e| format!("读取版本文件失败：{e}"))?;
+        let _ = std::fs::remove_file(&dest);
+
+        let version = text.trim();
+        if crate::version::is_valid(version) {
+            Ok(version.to_string())
+        } else {
+            Err(format!("无法识别的版本文件内容：{version}"))
+        }
+    }
+
+    fn download_latest(&self) -> Result<Fetched> {
         let asset = asset_name();
         println!("→ 正在下载 {asset}");
         let temp = std::env::temp_dir();

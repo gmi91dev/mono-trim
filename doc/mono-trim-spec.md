@@ -134,7 +134,8 @@ $ mtrim show
   - 项目版本更高 → `建议升级系统 CLI`
   - 项目版本更低 → `可运行 mtrim update 同步`
 - `mtrim update` 的行为：
-  1. 检查是否有新版 CLI：下载 `sha256sums.txt` 校验产物后再替换自身（校验失败不会改动现有文件）；
+  1. 先下载几百字节的 `version.txt` 查询最新版本；**只有确实存在新版本时**才下载二进制，
+     并用 `sha256sums.txt` 校验后再替换自身（校验失败不会改动现有文件）；
   2. 若当前目录已初始化且项目版本落后，用内置默认值重写系统配置并写入新版本；
   3. 两者都不需要 → 输出"已是最新"，不写任何文件。
 - 配置字段只增不删，所以从旧版本升级到新版本**不需要迁移、备份或重置用户配置**。
@@ -152,7 +153,7 @@ $ mtrim show
 irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
 
 # 指定版本 / 目录（iex 无法传参，用脚本块）
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.7 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.8 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -166,7 +167,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.7
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.8
 ```
 
 ### 参数
@@ -191,7 +192,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.7
+./mono-trim/scripts/install.sh --version 0.0.8
 ```
 
 ### 从源码
@@ -233,8 +234,8 @@ mtrim win-dev
 ### 发布（维护者）
 
 1. 修改 `Cargo.toml` 的 `version`；
-2. `git tag v0.0.7 && git push origin v0.0.7`；
-3. `.github/workflows/release.yml` 构建四个平台产物并附 `sha256sums.txt`。
+2. `git tag v0.0.8 && git push origin v0.0.8`；
+3. `.github/workflows/release.yml` 构建四个平台产物，并附 `sha256sums.txt` 与 `version.txt`（供 `update` 免下载查询版本）。
 
 ## ⏱️ 进度与耗时
 

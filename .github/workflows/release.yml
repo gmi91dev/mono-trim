@@ -79,10 +79,11 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Generate checksums
+      - name: Generate version and checksums
         run: |
           set -euo pipefail
           cd dist
+          echo "${GITHUB_REF_NAME#v}" > version.txt
           sha256sum * > /tmp/sha256sums.txt
           mv /tmp/sha256sums.txt .
           cat sha256sums.txt
