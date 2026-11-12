@@ -23,7 +23,7 @@ pub fn profile(project: &Project, name: &str, git: &dyn GitRunner) -> Result<()>
     let profile = config
         .profiles
         .get(name)
-        .ok_or_else(|| format!("未知命令 '{name}'。运行 mtrim ls 查看可用命令。"))?;
+        .ok_or_else(|| format!("配置中没有 '{name}' 命令。运行 mtrim ls 查看可用命令。"))?;
 
     println!("⏳ 正在执行自定义命令 [{name}] ({}) ...", profile.desc);
     // 先完整校验并生成计划，任何非法配置都在触碰工作空间之前拦截
@@ -90,7 +90,7 @@ targets = ["apps/ios/"]
 
         let err = profile(&project, "nope", &git).unwrap_err();
 
-        assert!(err.contains("未知命令 'nope'"), "{err}");
+        assert!(err.contains("配置中没有 'nope' 命令"), "{err}");
         assert!(git.calls().is_empty(), "不应调用 git");
     }
 

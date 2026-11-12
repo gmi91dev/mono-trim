@@ -90,7 +90,7 @@ targets = ["apps/ios/", "assets/large_video.mp4"]
 | 命令 | 作用 |
 | :--- | :--- |
 | `mtrim init` | 用内置默认值重新初始化系统配置；用户配置不存在时创建，存在则不动 |
-| `mtrim clone <仓库> [目录] [-p <命令>]` | 克隆仓库时只检出两份配置文件，其余文件按 profile 拉取 |
+| `mtrim clone <仓库> [目录] [-c <命令>]` | 克隆仓库；识别 mono-trim 配置，可立即执行某条命令 |
 | `mtrim update` | 升级系统 CLI；把项目记录的 `version` 同步到当前 CLI 版本（无变化则不写） |
 | `mtrim doctor` | 校验系统配置与用户配置的合法性（语法、字段、profile 命名、目标路径、是否被 `.gitignore` 忽略） |
 | `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
@@ -99,18 +99,18 @@ targets = ["apps/ios/", "assets/large_video.mp4"]
 | `mtrim applyall` | 恢复项目为全量工作空间（不需要配置文件） |
 | `mtrim <名称>` | 执行用户配置中的 profile |
 
-### `mtrim clone`（只拉取配置）
+### `mtrim clone`
 
 ```bash
-mtrim clone https://github.com/<owner>/<repo>.git [目录] [-p <profile>]
+mtrim clone <仓库> [目录] [-c <命令>]
 ```
 
-1. `git clone --filter=blob:none --no-checkout`（服务端不支持时退回普通克隆）；
-2. 非 cone 稀疏规则只放行 `/.mono-trim/config.toml` 与 `/mono-trim.toml`；
-3. `git checkout` 只落盘这两份配置文件；
-4. 打印可用命令；带 `-p/--profile` 时立即在该目录应用该 profile（按需下载其它文件）。
+1. 执行标准 `git clone`（工作空间为全量）；
+2. 如果仓库里有 mono-trim 配置：打印可用命令；带 `-c/--command` 时立即在该目录执行这条命令（按 profile 裁剪）；
+3. 如果没有配置：提示 `该仓库尚未使用 mono-trim 管理`，并建议运行 `mtrim init`；此时带 `-c` 会直接报错退出。
 
-目标目录已存在且非空会被拒绝；仓库没有使用 mono-trim 时给出警告与 `sparse-checkout disable` 提示。
+`-c` 的取值是 `[profiles.*]` 下的**命令名**，不是配置文件路径；命令不存在时提示 `配置中没有 '<名称>' 命令`。
+（旧参数 `-p/--profile` 作为隐藏别名保留兼容。）
 
 ### 典型输出
 
@@ -152,7 +152,7 @@ $ mtrim show
 irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1 | iex
 
 # 指定版本 / 目录（iex 无法传参，用脚本块）
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.5 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.6 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -166,7 +166,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.5
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.6
 ```
 
 ### 参数
@@ -191,7 +191,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.5
+./mono-trim/scripts/install.sh --version 0.0.6
 ```
 
 ### 从源码
@@ -233,7 +233,7 @@ mtrim win-dev
 ### 发布（维护者）
 
 1. 修改 `Cargo.toml` 的 `version`；
-2. `git tag v0.0.5 && git push origin v0.0.5`；
+2. `git tag v0.0.6 && git push origin v0.0.6`；
 3. `.github/workflows/release.yml` 构建四个平台产物并附 `sha256sums.txt`。
 
 ## 🧪 开发与测试

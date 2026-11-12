@@ -95,30 +95,14 @@ pub fn ensure_repo(git: &dyn GitRunner) -> Result<()> {
     }
 }
 
-/// 在指定目录执行 git（等价于 `git -C <dir> ...`）
-pub fn git_ok_in(git: &dyn GitRunner, dir: &Path, args: &[&str]) -> Result<()> {
-    let dir = dir.to_string_lossy().into_owned();
-    let mut all: Vec<&str> = vec!["-C", &dir];
-    all.extend_from_slice(args);
-    git_ok(git, &all)
-}
-
-/// 在指定目录执行 git 并返回 trimmed stdout
-fn stdout_in(git: &dyn GitRunner, dir: &Path, args: &[&str]) -> Result<String> {
-    let dir = dir.to_string_lossy().into_owned();
-    let mut all: Vec<&str> = vec!["-C", &dir];
-    all.extend_from_slice(args);
-    stdout(git, &all)
-}
-
 /// 查询某个仓库相对路径是否被 .gitignore 忽略
 ///
 /// 返回匹配的规则描述（例如 `.gitignore:3:mono-*.toml`）；未忽略或不是仓库时返回 None。
 pub fn ignore_reason(git: &dyn GitRunner, root: &Path, relative: &str) -> Result<Option<String>> {
     let root = root.to_string_lossy().into_owned();
 
-    // 先用 -q 判定：注意 `check-ignore -v` 在命中“否定规则”（!pattern）时退出码也是 0，
-    // 只有 -q 才能正确区分“真的被忽略”。
+    // 先用 -q 判定：`check-ignore -v` 命中否定规则（!pattern）时退出码也是 0，
+    // 只有 -q 能正确区分“真的被忽略”。
     let quiet = git.run(&["-C", &root, "check-ignore", "-q", "--", relative])?;
     if !quiet.success {
         return Ok(None);
@@ -131,17 +115,6 @@ pub fn ignore_reason(git: &dyn GitRunner, root: &Path, relative: &str) -> Result
     } else {
         reason.to_string()
     }))
-}
-
-/// 解析 `dir` 仓库内的 git 路径（返回绝对路径）
-pub fn git_path_in(git: &dyn GitRunner, dir: &Path, path: &str) -> Result<PathBuf> {
-    let raw = stdout_in(git, dir, &["rev-parse", "--git-path", path])?;
-    let path = PathBuf::from(raw);
-    Ok(if path.is_absolute() {
-        path
-    } else {
-        dir.join(path)
-    })
 }
 
 /// 兼容 worktree / 子目录调用，由 Git 自己给出 sparse-checkout 文件位置

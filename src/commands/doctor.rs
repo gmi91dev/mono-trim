@@ -74,6 +74,15 @@ pub fn run(project: &Project) -> Result<()> {
         )));
     }
 
+    if !has_user {
+        findings.push(warn(format!(
+            "缺少用户配置 {}（文件名固定），可运行 mtrim init 生成",
+            project.user_config_display()
+        )));
+    }
+
+    findings.extend(inspect_fixed_names(project));
+
     if has_user {
         match config::read_user(&project.user_config()) {
             Ok(parsed) => {
@@ -121,6 +130,31 @@ fn merge(system: &SystemConfig, user: &UserConfig) -> Config {
             .unwrap_or_else(|| config::DEFAULT_DOC_TARGET.to_string()),
         profiles,
     }
+}
+
+/// mono-trim 只认固定文件名，检测常见的错误命名
+const LEGACY_CONFIG_NAMES: [&str; 7] = [
+    ".mono-trim/config.yaml",
+    ".mono-trim/config.yml",
+    ".mono-trim/config.json",
+    "mono-trim.yaml",
+    "mono-trim.yml",
+    "mono-trim.json",
+    "mono-trim.config.toml",
+];
+
+fn inspect_fixed_names(project: &Project) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for relative in LEGACY_CONFIG_NAMES {
+        if project.root().join(relative).exists() {
+            findings.push(error(format!(
+                "检测到 {relative}：mono-trim 只读取固定的文件名 {} 与 {}，请重命名或删除",
+                project.system_config_display(),
+                project.user_config_display()
+            )));
+        }
+    }
+    findings
 }
 
 fn inspect_system(system: &SystemConfig) -> Vec<Finding> {

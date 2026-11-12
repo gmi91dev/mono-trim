@@ -199,7 +199,7 @@ fn unknown_command_points_to_ls() {
     let output = mtrim(dir.path(), &["nope"]);
 
     assert_eq!(exit_code(&output), Some(1));
-    assert!(stderr(&output).contains("未知命令 'nope'"));
+    assert!(stderr(&output).contains("配置中没有 'nope' 命令"));
     assert!(stderr(&output).contains("mtrim ls"));
 }
 
@@ -301,4 +301,52 @@ fn doctor_passes_when_gitignore_negates_config() {
 
     assert_eq!(exit_code(&output), Some(0), "{}", stdout(&output));
     assert!(!stdout(&output).contains("被 .gitignore 忽略"));
+}
+
+#[test]
+fn doctor_warns_when_user_config_missing() {
+    let dir = TempDir::new("doctor-no-user");
+    dir.write(
+        SYSTEM_CONFIG,
+        "version = \"0.1.0\"
+",
+    );
+
+    let output = mtrim(dir.path(), &["doctor"]);
+
+    assert_eq!(exit_code(&output), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("缺少用户配置"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn doctor_flags_wrong_config_file_name() {
+    let dir = TempDir::new("doctor-wrong-name");
+    dir.write(
+        SYSTEM_CONFIG,
+        "version = \"0.1.0\"
+",
+    );
+    dir.write(
+        USER_CONFIG,
+        "[profiles.ok]
+mode = \"black\"
+desc = \"x\"
+",
+    );
+    dir.write(
+        "mono-trim.yml",
+        "profiles: {}
+",
+    );
+
+    let output = mtrim(dir.path(), &["doctor"]);
+
+    assert_eq!(exit_code(&output), Some(1));
+    let text = stdout(&output);
+    assert!(text.contains("只读取固定的文件名"), "{text}");
+    assert!(stderr(&output).contains("检查未通过"));
 }

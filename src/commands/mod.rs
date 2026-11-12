@@ -26,7 +26,7 @@ pub fn dispatch(matches: ArgMatches) -> Result<()> {
                 .map(String::as_str)
                 .unwrap_or_default(),
             sub.get_one::<String>("directory").map(String::as_str),
-            sub.get_one::<String>("profile").map(String::as_str),
+            sub.get_one::<String>("command").map(String::as_str),
         ),
         Some(("update", _)) => update::run(&project, &GithubFetcher, &SelfReplacer),
         Some(("doctor", _)) => doctor::run(&project),

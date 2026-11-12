@@ -13,7 +13,7 @@ pub const BUILTIN_COMMANDS: [&str; 8] = [
 /// 内置命令说明，供 `ls -a` 与文档输出
 pub const BUILTIN_DESCRIPTIONS: [(&str, &str); 8] = [
     ("init", "使用内置默认值重新初始化项目配置"),
-    ("clone", "克隆仓库并只检出 mono-trim 配置文件"),
+    ("clone", "克隆仓库并识别其中的 mono-trim 配置"),
     ("update", "升级系统 CLI 并同步项目配置版本"),
     ("doctor", "校验系统配置与用户配置"),
     ("ls", "列出可用的裁剪命令"),
@@ -78,11 +78,13 @@ pub fn build() -> ClapCommand {
                 )
                 .arg(Arg::new("directory").help("目标目录，默认取仓库名"))
                 .arg(
-                    Arg::new("profile")
-                        .short('p')
-                        .long("profile")
+                    Arg::new("command")
+                        .short('c')
+                        .long("command")
+                        .short_alias('p')
+                        .alias("profile")
                         .num_args(1)
-                        .help("克隆后立即应用的 profile"),
+                        .help("克隆完成后立即执行的命令（取自仓库内的配置）"),
                 ),
         )
         .subcommand(ClapCommand::new("update").about(description("update")))

@@ -1,19 +1,13 @@
-//! `clone`：克隆仓库时只检出 mono-trim 的配置文件。
-//!
-//! 其余文件等执行 `mtrim <profile>` 时再按稀疏规则拉取，避免克隆整仓。
+//! `clone`：标准克隆仓库，并识别其中的 mono-trim 配置（可选地立即执行某条命令）。
 
 use std::path::PathBuf;
 
 use crate::Result;
 use crate::commands::{apply, ls};
 use crate::config::Project;
-use crate::git::{self, SystemGit};
-use crate::util::write_file;
+use crate::git::SystemGit;
 
-/// 克隆时只放行的路径（相对仓库根）
-const CONFIG_PATTERNS: [&str; 2] = ["/.mono-trim/config.toml", "/mono-trim.toml"];
-
-pub fn run(repository: &str, directory: Option<&str>, profile: Option<&str>) -> Result<()> {
+pub fn run(repository: &str, directory: Option<&str>, command: Option<&str>) -> Result<()> {
     let dir = match directory {
         Some(dir) => PathBuf::from(dir),
         None => PathBuf::from(default_dir_name(repository)),
@@ -33,33 +27,7 @@ pub fn run(repository: &str, directory: Option<&str>, profile: Option<&str>) -> 
 
     println!("⏳ 正在克隆 {} -> {} ...", repository, dir.display());
     let dir_arg = dir.to_string_lossy().into_owned();
-    let partial = git::git_ok(
-        &SystemGit,
-        &[
-            "clone",
-            "--filter=blob:none",
-            "--no-checkout",
-            repository,
-            &dir_arg,
-        ],
-    );
-    if let Err(error) = partial {
-        // 只有服务端不支持 partial clone 时才退回普通克隆，网络等错误直接上报
-        if !should_retry_without_filter(&error) {
-            return Err(error);
-        }
-        println!("⚠️  服务端不支持部分克隆，改为普通克隆（历史会完整下载）");
-        git::git_ok(
-            &SystemGit,
-            &["clone", "--no-checkout", repository, &dir_arg],
-        )?;
-    }
-
-    // 非 cone 模式：只放行两份配置文件
-    git::git_ok_in(&SystemGit, &dir, &["sparse-checkout", "init", "--no-cone"])?;
-    let sparse_path = git::git_path_in(&SystemGit, &dir, "info/sparse-checkout")?;
-    write_file(&sparse_path, &format!("{}\n", CONFIG_PATTERNS.join("\n")))?;
-    git::git_ok_in(&SystemGit, &dir, &["checkout"])?;
+    crate::git::git_ok(&SystemGit, &["clone", repository, &dir_arg])?;
 
     let root = std::env::current_dir()
         .map_err(|e| format!("无法获取当前目录：{e}"))?
@@ -67,22 +35,23 @@ pub fn run(repository: &str, directory: Option<&str>, profile: Option<&str>) -> 
     let project = Project::from_root(&root);
 
     if !project.is_initialized() {
+        println!("✨ 已克隆到 {}", dir.display());
+        println!("⚠️  该仓库尚未使用 mono-trim 管理（未找到配置文件）");
         println!(
-            "⚠️  该仓库未使用 mono-trim（未找到 {}）",
-            project.system_config_display()
-        );
-        println!(
-            "ℹ️ 如需完整检出：git -C {} sparse-checkout disable",
+            "ℹ️ 如需使用，请进入该目录执行：cd {} && mtrim init",
             dir.display()
         );
+        if command.is_some() {
+            return Err("该仓库尚未使用 mono-trim 管理，无法执行命令".into());
+        }
         return Ok(());
     }
 
-    println!("✨ 已克隆到 {}（仅配置文件）", dir.display());
+    println!("✨ 已克隆到 {}（未做裁剪，工作空间为全量）", dir.display());
     println!("ℹ️ 可用命令：");
     ls::run(&project, false)?;
 
-    match profile {
+    match command {
         Some(name) => {
             std::env::set_current_dir(&root)
                 .map_err(|e| format!("切换到 {} 失败：{e}", root.display()))?;
@@ -96,14 +65,6 @@ pub fn run(repository: &str, directory: Option<&str>, profile: Option<&str>) -> 
     }
 
     Ok(())
-}
-
-/// 判断 clone 失败是否因为服务端不支持 partial clone
-fn should_retry_without_filter(error: &str) -> bool {
-    let lowered = error.to_lowercase();
-    ["filter", "partial clone", "not supported", "not recognized"]
-        .iter()
-        .any(|needle| lowered.contains(needle))
 }
 
 /// 从仓库地址推导默认目录名
@@ -135,28 +96,7 @@ mod tests {
         );
         assert_eq!(default_dir_name("https://example.com/team/repo/"), "repo");
         assert_eq!(default_dir_name("repo"), "repo");
-        assert_eq!(default_dir_name(r"C:\work\repo"), "repo");
         assert_eq!(default_dir_name(""), "repo");
-    }
-
-    #[test]
-    fn retries_without_filter_only_for_filter_errors() {
-        assert!(should_retry_without_filter(
-            "warning: filtering not recognized by server, ignoring"
-        ));
-        assert!(should_retry_without_filter(
-            "error: server does not support filter"
-        ));
-        assert!(!should_retry_without_filter(
-            "fatal: unable to access: Could not connect to server"
-        ));
-        assert!(!should_retry_without_filter("fatal: repository not found"));
-    }
-
-    #[test]
-    fn config_patterns_are_repo_relative() {
-        for pattern in CONFIG_PATTERNS {
-            assert!(pattern.starts_with('/'), "{pattern}");
-        }
+        assert_eq!(default_dir_name(r"C:\work\repo"), "repo");
     }
 }
