@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 指定版本或目录（`iex` 无法传参，改用脚本块）：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.8 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.9 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.8
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.9
 ```
 
 ### 安装脚本参数
@@ -75,7 +75,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.8
+./mono-trim/scripts/install.sh --version 0.0.9
 ```
 
 ### 从源码
@@ -193,7 +193,7 @@ mtrim --version     # 查看当前版本
   !mono-trim.toml
   ```
   或临时 `git add -f .mono-trim/config.toml mono-trim.toml`。
-- **看不到耗时操作的进度？** 在交互式终端里，`clone`、`mtrim <命令>`、`applyall` 会直接把 git 的进度显示出来（下载/更新文件），`update` 会显示下载进度与各步骤耗时；输出被重定向（CI、管道）时自动静默。
+- **看不到耗时操作的进度？** 在交互式终端里，`clone`、`mtrim <命令>`、`applyall` 会直接把 git 的进度显示出来（下载/更新文件）；`update` 下载 CLI 时显示**自绘 ASCII 进度条**（百分比 + 已下载/总大小），并打印各步骤耗时；输出被重定向（CI、管道）时自动静默。
 - **为什么要两份配置**：工具需要记录的版本与默认值和你的业务配置分开，`update` 重写系统配置时不会碰你的内容。
 
 更详细的规范见 [doc/mono-trim-spec.md](doc/mono-trim-spec.md)。
@@ -210,7 +210,7 @@ cargo test --all-targets
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。
 
-发布：修改 `Cargo.toml` 版本 → `git tag v0.0.8 && git push origin v0.0.8`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
+发布：修改 `Cargo.toml` 版本 → `git tag v0.0.9 && git push origin v0.0.9`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
 
 ## License
 

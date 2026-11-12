@@ -14,6 +14,7 @@ mod cli;
 mod commands;
 mod config;
 mod git;
+mod progress;
 mod sparse;
 #[cfg(test)]
 mod test_support;

@@ -2,9 +2,11 @@
 //!
 //! 下载与替换都通过 trait 抽象，便于在没有网络（或没有真实 Release）时测试决策逻辑。
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
 
 use crate::Result;
 use crate::util::make_executable;
@@ -90,7 +92,7 @@ impl Fetcher for GithubFetcher {
     fn latest_version(&self) -> Result<String> {
         let dest = std::env::temp_dir().join(format!("mtrim-version-{}.txt", std::process::id()));
         let _ = std::fs::remove_file(&dest);
-        download(&latest_url("version.txt"), &dest)?;
+        download(&latest_url("version.txt"), &dest, false)?;
         let text = std::fs::read_to_string(&dest).map_err(|e| format!("读取版本文件失败：{e}"))?;
         let _ = std::fs::remove_file(&dest);
 
@@ -112,14 +114,14 @@ impl Fetcher for GithubFetcher {
         let _ = std::fs::remove_file(&dest);
 
         // 先取校验和，再下载产物，避免下载后才发现校验失败
-        download(&latest_url("sha256sums.txt"), &sums)?;
+        download(&latest_url("sha256sums.txt"), &sums, false)?;
         let text =
             std::fs::read_to_string(&sums).map_err(|e| format!("读取校验和文件失败：{e}"))?;
         let expected = parse_checksum(&text, &asset)
             .ok_or_else(|| format!("校验文件中没有 {asset} 的记录"))?;
         let _ = std::fs::remove_file(&sums);
 
-        download(&latest_url(&asset), &dest)?;
+        download(&latest_url(&asset), &dest, true)?;
 
         println!("→ 正在校验 sha256");
         let actual = crate::util::sha256_file(&dest)?;
@@ -137,37 +139,24 @@ impl Fetcher for GithubFetcher {
     }
 }
 
-fn download(url: &str, dest: &Path) -> Result<()> {
+fn download(url: &str, dest: &Path, show_progress: bool) -> Result<()> {
     // 失败时统一给出简洁提示，避免把各平台本地化的命令输出直接抛给用户
     let hint = || format!("下载 {url} 失败，请检查网络或手动从 Release 安装");
 
     // 优先 curl（Win10+ / macOS / Linux 通常自带）
-    let mut curl = Command::new("curl");
-    curl.args(["-fsSL", "--retry", "3", "--retry-all-errors"]);
-    if want_progress() {
-        // 继承终端 stderr，让 curl 的进度条可见
-        curl.arg("--progress-bar");
-        let ok = curl
-            .arg("-o")
-            .arg(dest)
-            .arg(url)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if ok {
-            return Ok(());
-        }
-    } else {
-        let ok = curl
-            .arg("-o")
-            .arg(dest)
-            .arg(url)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false);
-        if ok {
-            return Ok(());
-        }
+    if want_progress() && show_progress {
+        return curl_with_progress(url, dest);
+    }
+
+    let ok = Command::new("curl")
+        .args(["-fsSL", "--retry", "3", "--retry-all-errors", "-o"])
+        .arg(dest)
+        .arg(url)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if ok {
+        return Ok(());
     }
 
     #[cfg(windows)]
@@ -188,6 +177,75 @@ fn download(url: &str, dest: &Path) -> Result<()> {
 
     #[cfg(not(windows))]
     Err(hint())
+}
+
+/// 交互式终端：curl 静默下载，主线程轮询文件大小绘制自绘进度条
+fn curl_with_progress(url: &str, dest: &Path) -> Result<()> {
+    let total = remote_size(url);
+    let mut child = Command::new("curl")
+        .args(["-fsSL", "--retry", "3", "--retry-all-errors", "-o"])
+        .arg(dest)
+        .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("无法执行 curl：{e}"))?;
+
+    let mut bar = crate::progress::ProgressBar::new("下载", total);
+    let mut stderr = child.stderr.take();
+    let mut last_size = 0;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    bar.finish();
+                    return Ok(());
+                }
+                let mut message = String::new();
+                if let Some(pipe) = stderr.as_mut() {
+                    let _ = pipe.read_to_string(&mut message);
+                }
+                bar.finish();
+                let detail = message.trim();
+                return Err(if detail.is_empty() {
+                    format!("下载 {url} 失败，请检查网络或手动从 Release 安装")
+                } else {
+                    format!("下载 {url} 失败：{detail}")
+                });
+            }
+            Ok(None) => {
+                if let Ok(metadata) = std::fs::metadata(dest) {
+                    last_size = metadata.len();
+                }
+                bar.advance(last_size);
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                bar.finish();
+                return Err(format!("等待下载进程失败：{e}"));
+            }
+        }
+    }
+}
+
+/// 通过 HEAD 请求获取文件大小（失败时返回 None，进度条退化为已下载量）
+fn remote_size(url: &str) -> Option<u64> {
+    let output = Command::new("curl").args(["-fsSIL", url]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let headers = String::from_utf8_lossy(&output.stdout);
+    let mut size = None;
+    for line in headers.lines() {
+        if let Some((name, value)) = line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("content-length")
+        {
+            size = value.trim().parse::<u64>().ok().or(size);
+        }
+    }
+    size.filter(|value| *value > 0)
 }
 
 /// 终端下才显示下载进度；重定向（CI / 管道）时保持安静
@@ -267,6 +325,23 @@ mod tests {
             "{url}"
         );
         assert!(url.starts_with("http"), "{url}");
+    }
+
+    #[test]
+    fn curl_with_progress_copies_local_file() {
+        let dir = crate::test_support::TempDir::new("dl-progress");
+        let source = dir.write("source.bin", "hello mtrim");
+        let dest = dir.path().join("dest.bin");
+
+        let text = source.display().to_string().replace('\\', "/");
+        let url = if text.starts_with('/') {
+            format!("file://{text}")
+        } else {
+            format!("file:///{text}")
+        };
+
+        curl_with_progress(&url, &dest).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello mtrim");
     }
 
     #[test]
