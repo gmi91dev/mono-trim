@@ -3,5 +3,5 @@ source: tests/golden.rs
 expression: dir.read(SYSTEM_CONFIG)
 ---
 # 系统配置：由 mono-trim 生成，请勿手工修改（mtrim init / update 会整体重写本文件）
-version = "0.0.6"
+version = "0.0.7"
 doc_target = "README.md"

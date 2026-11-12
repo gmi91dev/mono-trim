@@ -80,9 +80,15 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' 0
 
 echo "→ 下载中..."
+# 终端下显示进度条；被重定向（CI / 管道）时不输出噪声
+if [ -t 2 ]; then
+    CURL_MODE="--progress-bar"
+else
+    CURL_MODE="-s"
+fi
 download() {
-    # 重试过程中的 curl 噪声不输出，最终失败才报错
-    curl -fsSL --retry 3 --retry-all-errors -o "$2" "$1" 2>/dev/null || {
+    # shellcheck disable=SC2086
+    curl -fL $CURL_MODE --retry 3 --retry-all-errors -o "$2" "$1" || {
         echo "❌ 下载失败：$1" >&2
         exit 1
     }

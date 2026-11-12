@@ -60,9 +60,19 @@ function Download-File([string]$Url, [string]$OutFile) {
 
     # Prefer curl.exe: Invoke-WebRequest may fail on some TLS / proxy setups
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-        $Out = & curl.exe -fsSL --retry 3 --retry-all-errors -o $OutFile $Url 2>&1
-        if ($LASTEXITCODE -eq 0) { return }
-        $Errors += ($Out | Out-String).Trim()
+        $CurlArgs = @("-fsSL", "--retry", "3", "--retry-all-errors")
+        if (-not [Console]::IsErrorRedirected) {
+            # Keep the progress bar visible in an interactive terminal
+            $CurlArgs += "--progress-bar"
+            & curl.exe @CurlArgs -o $OutFile $Url
+            $CurlOk = ($LASTEXITCODE -eq 0)
+        }
+        else {
+            $Out = & curl.exe @CurlArgs -o $OutFile $Url 2>&1
+            $CurlOk = ($LASTEXITCODE -eq 0)
+            if (-not $CurlOk) { $Errors += ($Out | Out-String).Trim() }
+        }
+        if ($CurlOk) { return }
     }
     if (Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue) {
         try {

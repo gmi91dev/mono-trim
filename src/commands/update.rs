@@ -6,15 +6,18 @@
 use crate::Result;
 use crate::config::{Project, current_version};
 use crate::update::{Fetcher, Replacer};
+use crate::util::{is_interactive, step};
 use crate::version;
 use std::fs;
 
 pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) -> Result<()> {
+    let started = std::time::Instant::now();
     let mut effective = current_version().to_string();
     let mut acted = false;
     let mut cli_checked = false;
 
     // 1) 系统 CLI
+    println!("⏳ 正在检查系统 CLI 更新（当前 {}）...", current_version());
     match fetcher.fetch_latest() {
         Ok(fetched) if version::is_newer(&fetched.version, current_version()) => {
             cli_checked = true;
@@ -37,6 +40,7 @@ pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) ->
 
     // 2) 项目系统配置（仅在已初始化时）
     if project.is_initialized() {
+        step("检查项目配置版本");
         let recorded = project
             .load_system()?
             .version
@@ -58,6 +62,10 @@ pub fn run(project: &Project, fetcher: &dyn Fetcher, replacer: &dyn Replacer) ->
         } else {
             println!("ℹ️ 项目配置已是最新（{effective}）；系统 CLI 更新未检查");
         }
+    }
+
+    if is_interactive() {
+        println!("   （耗时 {:.1}s）", started.elapsed().as_secs_f64());
     }
     Ok(())
 }

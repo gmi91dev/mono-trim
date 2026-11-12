@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::Result;
 use crate::commands::{apply, ls};
 use crate::config::Project;
-use crate::git::SystemGit;
+use crate::git::{GitRunner, SystemGit};
 
 pub fn run(repository: &str, directory: Option<&str>, command: Option<&str>) -> Result<()> {
     let dir = match directory {
@@ -25,9 +25,13 @@ pub fn run(repository: &str, directory: Option<&str>, command: Option<&str>) -> 
         }
     }
 
-    println!("⏳ 正在克隆 {} -> {} ...", repository, dir.display());
+    println!("⏳ 正在克隆 {} -> {}", repository, dir.display());
+    println!("   （大型仓库可能需要几分钟，git 会显示下载进度）");
+    let started = std::time::Instant::now();
     let dir_arg = dir.to_string_lossy().into_owned();
-    crate::git::git_ok(&SystemGit, &["clone", repository, &dir_arg])?;
+    // 继承终端输出，让 git 的进度条/统计直接展示出来
+    SystemGit.run_inherit(&["clone", repository, &dir_arg])?;
+    println!("✅ 克隆完成，用时 {:.1}s", started.elapsed().as_secs_f64());
 
     let root = std::env::current_dir()
         .map_err(|e| format!("无法获取当前目录：{e}"))?

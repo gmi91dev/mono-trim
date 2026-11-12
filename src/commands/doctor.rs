@@ -8,6 +8,7 @@ use crate::cli;
 use crate::config::{self, Config, Project, SystemConfig, USER_CONFIG, UserConfig};
 use crate::git::SystemGit;
 use crate::sparse::{is_absolute_like, normalize_target};
+use crate::util::{is_interactive, step};
 use crate::version;
 
 /// 检查项的严重级别
@@ -54,11 +55,13 @@ pub fn run(project: &Project) -> Result<()> {
         project.system_config_display(),
         project.user_config_display()
     );
+    let started = std::time::Instant::now();
 
     let mut findings = Vec::new();
     let mut system = None;
     let mut user = None;
 
+    step("解析系统配置");
     if has_system {
         match config::read_system(&project.system_config()) {
             Ok(parsed) => {
@@ -83,6 +86,7 @@ pub fn run(project: &Project) -> Result<()> {
 
     findings.extend(inspect_fixed_names(project));
 
+    step("解析用户配置");
     if has_user {
         match config::read_user(&project.user_config()) {
             Ok(parsed) => {
@@ -94,9 +98,11 @@ pub fn run(project: &Project) -> Result<()> {
     }
 
     if let (Some(system), Some(user)) = (&system, &user) {
+        step("校验 profile 与目标路径");
         findings.extend(inspect_profiles(&merge(system, user), project.root()));
     }
 
+    step("检查 .gitignore 规则");
     match project.ignored_configs(&SystemGit) {
         Ok(ignored) => {
             for (display, rule) in ignored {
@@ -115,7 +121,12 @@ pub fn run(project: &Project) -> Result<()> {
             Level::Warn => checker.warn(finding.message),
         }
     }
-    checker.finish()
+
+    let result = checker.finish();
+    if is_interactive() {
+        println!("   （耗时 {:.2}s）", started.elapsed().as_secs_f64());
+    }
+    result
 }
 
 fn merge(system: &SystemConfig, user: &UserConfig) -> Config {

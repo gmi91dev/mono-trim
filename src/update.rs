@@ -2,6 +2,7 @@
 //!
 //! 下载与替换都通过 trait 抽象，便于在没有网络（或没有真实 Release）时测试决策逻辑。
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -84,6 +85,7 @@ pub struct GithubFetcher;
 impl Fetcher for GithubFetcher {
     fn fetch_latest(&self) -> Result<Fetched> {
         let asset = asset_name();
+        println!("→ 正在下载 {asset}");
         let temp = std::env::temp_dir();
         let sums = temp.join(format!("mtrim-sums-{}.txt", std::process::id()));
         let dest = temp.join(download_file_name(&asset));
@@ -100,6 +102,7 @@ impl Fetcher for GithubFetcher {
 
         download(&latest_url(&asset), &dest)?;
 
+        println!("→ 正在校验 sha256");
         let actual = crate::util::sha256_file(&dest)?;
         if actual != expected {
             let _ = std::fs::remove_file(&dest);
@@ -118,15 +121,34 @@ impl Fetcher for GithubFetcher {
 fn download(url: &str, dest: &Path) -> Result<()> {
     // 失败时统一给出简洁提示，避免把各平台本地化的命令输出直接抛给用户
     let hint = || format!("下载 {url} 失败，请检查网络或手动从 Release 安装");
+
     // 优先 curl（Win10+ / macOS / Linux 通常自带）
-    if let Ok(output) = Command::new("curl")
-        .args(["-fsSL", "--retry", "2", "-o"])
-        .arg(dest)
-        .arg(url)
-        .output()
-        && output.status.success()
-    {
-        return Ok(());
+    let mut curl = Command::new("curl");
+    curl.args(["-fsSL", "--retry", "3", "--retry-all-errors"]);
+    if want_progress() {
+        // 继承终端 stderr，让 curl 的进度条可见
+        curl.arg("--progress-bar");
+        let ok = curl
+            .arg("-o")
+            .arg(dest)
+            .arg(url)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(());
+        }
+    } else {
+        let ok = curl
+            .arg("-o")
+            .arg(dest)
+            .arg(url)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(());
+        }
     }
 
     #[cfg(windows)]
@@ -147,6 +169,11 @@ fn download(url: &str, dest: &Path) -> Result<()> {
 
     #[cfg(not(windows))]
     Err(hint())
+}
+
+/// 终端下才显示下载进度；重定向（CI / 管道）时保持安静
+fn want_progress() -> bool {
+    std::io::stderr().is_terminal()
 }
 
 fn read_version(binary: &Path) -> Result<String> {
@@ -221,6 +248,12 @@ mod tests {
             "{url}"
         );
         assert!(url.starts_with("http"), "{url}");
+    }
+
+    #[test]
+    fn progress_is_disabled_when_not_a_terminal() {
+        // 测试环境 stderr 不是终端，不应输出进度条
+        assert!(!want_progress());
     }
 
     #[test]

@@ -2,9 +2,22 @@
 
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::Result;
+
+/// 是否在交互式终端中运行（CI / 管道为 false）
+pub fn is_interactive() -> bool {
+    std::io::stdout().is_terminal()
+}
+
+/// 打印子步骤（仅在交互式终端下输出，保持 CI 日志干净）
+pub fn step(message: &str) {
+    if is_interactive() {
+        println!("   {message}");
+    }
+}
 
 /// 计算文件的 sha256（小写十六进制）
 pub fn sha256_file(path: &Path) -> Result<String> {

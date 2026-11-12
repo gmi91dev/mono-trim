@@ -38,6 +38,23 @@ impl GitOutput {
 /// 执行 git 的能力抽象
 pub trait GitRunner {
     fn run(&self, args: &[&str]) -> Result<GitOutput>;
+
+    /// 让 git 直接把输出/进度打到终端（用于 clone、reapply 等耗时操作）
+    ///
+    /// 默认实现回退到 `run`，便于测试替身复用。
+    fn run_inherit(&self, args: &[&str]) -> Result<()> {
+        let output = self.run(args)?;
+        if output.success {
+            Ok(())
+        } else {
+            let detail = output.stderr.trim();
+            Err(if detail.is_empty() {
+                format!("git {} 执行失败。", args.join(" "))
+            } else {
+                format!("git {} 执行失败：{detail}", args.join(" "))
+            })
+        }
+    }
 }
 
 /// 真实调用系统 git
@@ -45,6 +62,22 @@ pub trait GitRunner {
 pub struct SystemGit;
 
 impl GitRunner for SystemGit {
+    fn run_inherit(&self, args: &[&str]) -> Result<()> {
+        let status = Command::new("git")
+            .args(args)
+            .status()
+            .map_err(|e| format!("无法执行 git（{e}），请确认已安装并加入 PATH。"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "git {} 执行失败（退出码 {}）",
+                args.join(" "),
+                status.code().unwrap_or(-1)
+            ))
+        }
+    }
+
     fn run(&self, args: &[&str]) -> Result<GitOutput> {
         let output = Command::new("git")
             .args(args)
@@ -182,6 +215,15 @@ mod tests {
         let git = FakeGit::new().on("config --bool core.sparseCheckout", GitOutput::fail(""));
 
         assert!(!sparse_enabled(&git).unwrap());
+    }
+
+    #[test]
+    fn run_inherit_forwards_failure_from_fake() {
+        let git = FakeGit::new().on("sparse-checkout reapply", GitOutput::fail("fatal: boom"));
+        let err = git
+            .run_inherit(&["sparse-checkout", "reapply"])
+            .unwrap_err();
+        assert!(err.contains("boom"), "{err}");
     }
 
     #[test]

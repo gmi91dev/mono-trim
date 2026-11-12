@@ -35,11 +35,17 @@ pub fn profile(project: &Project, name: &str, git: &dyn GitRunner) -> Result<()>
         }
     }
 
-    git_ok(git, &["sparse-checkout", "init", "--no-cone"])?;
+    git.run_inherit(&["sparse-checkout", "init", "--no-cone"])?;
     write_file(&sparse_checkout_path(git)?, &plan.patterns)?;
-    git_ok(git, &["sparse-checkout", "reapply"])?;
 
-    println!("✨ 工作空间拓扑裁剪成功！");
+    println!("⏳ 正在更新工作区（大仓库需要按需下载文件，git 会显示进度）...");
+    let started = std::time::Instant::now();
+    git.run_inherit(&["sparse-checkout", "reapply"])?;
+
+    println!(
+        "✨ 工作空间拓扑裁剪成功（用时 {:.1}s）！",
+        started.elapsed().as_secs_f64()
+    );
     Ok(())
 }
 
