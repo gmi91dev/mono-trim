@@ -139,7 +139,7 @@ targets = ["rust/", "Makefile", "Cargo.toml"]
 | :--- | :--- |
 | `mtrim init` | 用内置默认值初始化项目配置（系统配置会重写，用户配置只在缺失时创建） |
 | `mtrim clone <仓库> [目录] [-c <命令>]` | 克隆仓库；识别其中的 mono-trim 配置，可立即执行某条命令 |
-| `mtrim update` | 升级系统 CLI（先查 `version.txt`，只有新版本才下载）；并把项目配置版本同步到当前 CLI |
+| `mtrim update [-v <版本>]` | 升级系统 CLI（默认最新版；`-v` 指定版本，只升不降）；并把项目配置版本同步到当前 CLI |
 | `mtrim doctor` | 校验系统配置与用户配置的合法性（含是否被 `.gitignore` 忽略） |
 | `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
 | `mtrim show` | 打印两份配置文件的位置与是否存在 |
@@ -176,8 +176,9 @@ mtrim clone <url> work/mono -c win-dev
 ## 升级
 
 ```bash
-mtrim update        # 有新版本则升级 CLI，并同步项目配置版本
-mtrim --version     # 查看当前版本
+mtrim update           # 升级到最新版，并同步项目配置版本
+mtrim update -v 0.0.9  # 升级到指定版本（仅支持升级，不允许降级）
+mtrim --version        # 查看当前版本
 ```
 
 配置字段只增不删，所以从旧版本升级到新版本不需要迁移脚本，也不会动你的用户配置。

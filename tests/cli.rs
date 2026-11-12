@@ -229,16 +229,8 @@ fn init_warns_when_config_is_gitignored() {
     init_repo(
         dir.path(),
         &[
-            (
-                "Makefile", "all:
-",
-            ),
-            (
-                ".gitignore",
-                ".mono-trim/
-mono-trim.toml
-",
-            ),
+            ("Makefile", "all:\n"),
+            (".gitignore", ".mono-trim/\nmono-trim.toml\n"),
         ],
     );
 
@@ -255,19 +247,8 @@ mono-trim.toml
 #[test]
 fn doctor_reports_config_ignored_by_gitignore() {
     let dir = TempDir::new("doctor-ignored");
-    init_project(
-        dir.path(),
-        &[(
-            "Makefile", "all:
-",
-        )],
-    );
-    dir.write(
-        ".gitignore",
-        ".mono-trim/
-mono-trim.toml
-",
-    );
+    init_project(dir.path(), &[("Makefile", "all:\n")]);
+    dir.write(".gitignore", ".mono-trim/\nmono-trim.toml\n");
 
     let output = mtrim(dir.path(), &["doctor"]);
 
@@ -282,20 +263,8 @@ mono-trim.toml
 #[test]
 fn doctor_passes_when_gitignore_negates_config() {
     let dir = TempDir::new("doctor-negated");
-    init_project(
-        dir.path(),
-        &[(
-            "Makefile", "all:
-",
-        )],
-    );
-    dir.write(
-        ".gitignore",
-        "*.log
-!.mono-trim/
-!mono-trim.toml
-",
-    );
+    init_project(dir.path(), &[("Makefile", "all:\n")]);
+    dir.write(".gitignore", "*.log\n!.mono-trim/\n!mono-trim.toml\n");
 
     let output = mtrim(dir.path(), &["doctor"]);
 
@@ -306,11 +275,7 @@ fn doctor_passes_when_gitignore_negates_config() {
 #[test]
 fn doctor_warns_when_user_config_missing() {
     let dir = TempDir::new("doctor-no-user");
-    dir.write(
-        SYSTEM_CONFIG,
-        "version = \"0.1.0\"
-",
-    );
+    dir.write(SYSTEM_CONFIG, "version = \"0.1.0\"\n");
 
     let output = mtrim(dir.path(), &["doctor"]);
 
@@ -325,23 +290,12 @@ fn doctor_warns_when_user_config_missing() {
 #[test]
 fn doctor_flags_wrong_config_file_name() {
     let dir = TempDir::new("doctor-wrong-name");
-    dir.write(
-        SYSTEM_CONFIG,
-        "version = \"0.1.0\"
-",
-    );
+    dir.write(SYSTEM_CONFIG, "version = \"0.1.0\"\n");
     dir.write(
         USER_CONFIG,
-        "[profiles.ok]
-mode = \"black\"
-desc = \"x\"
-",
+        "[profiles.ok]\nmode = \"black\"\ndesc = \"x\"\n",
     );
-    dir.write(
-        "mono-trim.yml",
-        "profiles: {}
-",
-    );
+    dir.write("mono-trim.yml", "profiles: {}\n");
 
     let output = mtrim(dir.path(), &["doctor"]);
 
@@ -349,4 +303,45 @@ desc = \"x\"
     let text = stdout(&output);
     assert!(text.contains("只读取固定的文件名"), "{text}");
     assert!(stderr(&output).contains("检查未通过"));
+}
+
+#[test]
+fn update_rejects_downgrade_argument() {
+    let dir = TempDir::new("update-downgrade-arg");
+    assert!(mtrim(dir.path(), &["init"]).status.success());
+
+    let output = mtrim(dir.path(), &["update", "-v", "0.0.1"]);
+
+    assert_eq!(exit_code(&output), Some(1));
+    assert!(
+        stderr(&output).contains("不支持降级"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn update_accepts_current_version_argument() {
+    let dir = TempDir::new("update-current-arg");
+    assert!(mtrim(dir.path(), &["init"]).status.success());
+
+    let output = mtrim(dir.path(), &["update", "-v", env!("CARGO_PKG_VERSION")]);
+
+    assert_eq!(exit_code(&output), Some(0), "{}", stderr(&output));
+    assert!(stdout(&output).contains("已是最新"), "{}", stdout(&output));
+}
+
+#[test]
+fn update_rejects_invalid_version_argument() {
+    let dir = TempDir::new("update-invalid-arg");
+    assert!(mtrim(dir.path(), &["init"]).status.success());
+
+    let output = mtrim(dir.path(), &["update", "-v", "latest"]);
+
+    assert_eq!(exit_code(&output), Some(1));
+    assert!(
+        stderr(&output).contains("版本号格式不正确"),
+        "{}",
+        stderr(&output)
+    );
 }

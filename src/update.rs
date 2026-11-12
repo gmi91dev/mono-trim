@@ -27,6 +27,9 @@ pub trait Fetcher {
 
     /// 下载最新版二进制并校验（仅在确实需要升级时调用）
     fn download_latest(&self) -> Result<Fetched>;
+
+    /// 下载指定版本二进制并校验
+    fn download_version(&self, version: &str) -> Result<Fetched>;
 }
 
 /// 用新产物替换当前可执行文件
@@ -105,38 +108,47 @@ impl Fetcher for GithubFetcher {
     }
 
     fn download_latest(&self) -> Result<Fetched> {
-        let asset = asset_name();
-        println!("→ 正在下载 {asset}");
-        let temp = std::env::temp_dir();
-        let sums = temp.join(format!("mtrim-sums-{}.txt", std::process::id()));
-        let dest = temp.join(download_file_name(&asset));
-        let _ = std::fs::remove_file(&sums);
-        let _ = std::fs::remove_file(&dest);
-
-        // 先取校验和，再下载产物，避免下载后才发现校验失败
-        download(&latest_url("sha256sums.txt"), &sums, false)?;
-        let text =
-            std::fs::read_to_string(&sums).map_err(|e| format!("读取校验和文件失败：{e}"))?;
-        let expected = parse_checksum(&text, &asset)
-            .ok_or_else(|| format!("校验文件中没有 {asset} 的记录"))?;
-        let _ = std::fs::remove_file(&sums);
-
-        download(&latest_url(&asset), &dest, true)?;
-
-        println!("→ 正在校验 sha256");
-        let actual = crate::util::sha256_file(&dest)?;
-        if actual != expected {
-            let _ = std::fs::remove_file(&dest);
-            return Err(format!("sha256 校验失败（期望 {expected}，实际 {actual}）"));
-        }
-
-        make_executable(&dest);
-        let version = read_version(&dest)?;
-        Ok(Fetched {
-            version,
-            binary: dest,
-        })
+        fetch_from(&format!("{}/releases/latest/download", release_base()))
     }
+
+    fn download_version(&self, version: &str) -> Result<Fetched> {
+        let version = version.trim().trim_start_matches('v');
+        fetch_from(&format!("{}/releases/download/v{version}", release_base()))
+    }
+}
+
+/// 从指定 release 目录下载产物并校验
+fn fetch_from(base: &str) -> Result<Fetched> {
+    let asset = asset_name();
+    println!("→ 正在下载 {asset}");
+    let temp = std::env::temp_dir();
+    let sums = temp.join(format!("mtrim-sums-{}.txt", std::process::id()));
+    let dest = temp.join(download_file_name(&asset));
+    let _ = std::fs::remove_file(&sums);
+    let _ = std::fs::remove_file(&dest);
+
+    // 先取校验和，再下载产物，避免下载后才发现校验失败
+    download(&format!("{base}/sha256sums.txt"), &sums, false)?;
+    let text = std::fs::read_to_string(&sums).map_err(|e| format!("读取校验和文件失败：{e}"))?;
+    let expected =
+        parse_checksum(&text, &asset).ok_or_else(|| format!("校验文件中没有 {asset} 的记录"))?;
+    let _ = std::fs::remove_file(&sums);
+
+    download(&format!("{base}/{asset}"), &dest, true)?;
+
+    println!("→ 正在校验 sha256");
+    let actual = crate::util::sha256_file(&dest)?;
+    if actual != expected {
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!("sha256 校验失败（期望 {expected}，实际 {actual}）"));
+    }
+
+    make_executable(&dest);
+    let version = read_version(&dest)?;
+    Ok(Fetched {
+        version,
+        binary: dest,
+    })
 }
 
 fn download(url: &str, dest: &Path, show_progress: bool) -> Result<()> {
@@ -352,10 +364,8 @@ mod tests {
 
     #[test]
     fn parses_checksums_in_all_formats() {
-        let text = "aaa  *mtrim-win-x86_64.exe
-bbb  ./mtrim-macos-aarch64
-ccc  mtrim-linux-x86_64
-";
+        let text =
+            "aaa  *mtrim-win-x86_64.exe\nbbb  ./mtrim-macos-aarch64\nccc  mtrim-linux-x86_64\n";
 
         assert_eq!(
             parse_checksum(text, "mtrim-win-x86_64.exe").as_deref(),

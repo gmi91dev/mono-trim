@@ -87,7 +87,15 @@ pub fn build() -> ClapCommand {
                         .help("克隆完成后立即执行的命令（取自仓库内的配置）"),
                 ),
         )
-        .subcommand(ClapCommand::new("update").about(description("update")))
+        .subcommand(
+            ClapCommand::new("update").about(description("update")).arg(
+                Arg::new("version")
+                    .short('v')
+                    .long("version")
+                    .num_args(1)
+                    .help("更新到指定版本（仅支持升级，不支持降级）"),
+            ),
+        )
         .subcommand(ClapCommand::new("doctor").about(description("doctor")))
         .subcommand(
             ClapCommand::new("ls").about(description("ls")).arg(

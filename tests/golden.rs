@@ -57,3 +57,14 @@ fn ls_output() {
 
     insta::assert_snapshot!("ls", stdout(&output));
 }
+
+#[test]
+fn update_help_output() {
+    let dir = TempDir::new("golden-update-help");
+    let output = mtrim(dir.path(), &["update", "--help"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    insta::with_settings!({filters => vec![(r"mtrim\.exe", "mtrim")]}, {
+        insta::assert_snapshot!("update_help", stdout(&output));
+    });
+}

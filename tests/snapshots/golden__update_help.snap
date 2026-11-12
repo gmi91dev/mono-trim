@@ -1,0 +1,11 @@
+---
+source: tests/golden.rs
+expression: stdout(&output)
+---
+升级系统 CLI 并同步项目配置版本
+
+Usage: mtrim update
+
+Options:
+  -v, --version <version>  更新到指定版本（仅支持升级，不支持降级）
+  -h, --help               Print help

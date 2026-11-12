@@ -28,7 +28,12 @@ pub fn dispatch(matches: ArgMatches) -> Result<()> {
             sub.get_one::<String>("directory").map(String::as_str),
             sub.get_one::<String>("command").map(String::as_str),
         ),
-        Some(("update", _)) => update::run(&project, &GithubFetcher, &SelfReplacer),
+        Some(("update", sub)) => update::run(
+            &project,
+            &GithubFetcher,
+            &SelfReplacer,
+            sub.get_one::<String>("version").map(String::as_str),
+        ),
         Some(("doctor", _)) => doctor::run(&project),
         Some(("ls", sub_matches)) => ls::run(&project, sub_matches.get_flag("all")),
         Some(("show", _)) => show::run(&project),
