@@ -5,7 +5,8 @@ use std::path::Path;
 
 use crate::Result;
 use crate::cli;
-use crate::config::{self, Config, Project, SystemConfig, UserConfig};
+use crate::config::{self, Config, Project, SystemConfig, USER_CONFIG, UserConfig};
+use crate::git::SystemGit;
 use crate::sparse::{is_absolute_like, normalize_target};
 use crate::version;
 
@@ -85,6 +86,17 @@ pub fn run(project: &Project) -> Result<()> {
 
     if let (Some(system), Some(user)) = (&system, &user) {
         findings.extend(inspect_profiles(&merge(system, user), project.root()));
+    }
+
+    match project.ignored_configs(&SystemGit) {
+        Ok(ignored) => {
+            for (display, rule) in ignored {
+                findings.push(error(format!(
+                    "{display} 被 .gitignore 忽略（{rule}），队友与 CI 将拿不到配置；请在 .gitignore 中添加例外 !.mono-trim/ 与 !{USER_CONFIG}"
+                )));
+            }
+        }
+        Err(e) => findings.push(warn(format!("无法检查 .gitignore：{e}"))),
     }
 
     let mut checker = Checker::default();

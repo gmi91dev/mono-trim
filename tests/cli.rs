@@ -222,3 +222,83 @@ fn applyall_requires_git_repository() {
     assert_eq!(exit_code(&output), Some(1));
     assert!(stderr(&output).contains("不是一个 Git 仓库"));
 }
+
+#[test]
+fn init_warns_when_config_is_gitignored() {
+    let dir = TempDir::new("init-ignored");
+    init_repo(
+        dir.path(),
+        &[
+            (
+                "Makefile", "all:
+",
+            ),
+            (
+                ".gitignore",
+                ".mono-trim/
+mono-trim.toml
+",
+            ),
+        ],
+    );
+
+    let output = mtrim(dir.path(), &["init"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("被 .gitignore 忽略"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn doctor_reports_config_ignored_by_gitignore() {
+    let dir = TempDir::new("doctor-ignored");
+    init_project(
+        dir.path(),
+        &[(
+            "Makefile", "all:
+",
+        )],
+    );
+    dir.write(
+        ".gitignore",
+        ".mono-trim/
+mono-trim.toml
+",
+    );
+
+    let output = mtrim(dir.path(), &["doctor"]);
+
+    assert_eq!(exit_code(&output), Some(1));
+    assert!(
+        stdout(&output).contains("被 .gitignore 忽略"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn doctor_passes_when_gitignore_negates_config() {
+    let dir = TempDir::new("doctor-negated");
+    init_project(
+        dir.path(),
+        &[(
+            "Makefile", "all:
+",
+        )],
+    );
+    dir.write(
+        ".gitignore",
+        "*.log
+!.mono-trim/
+!mono-trim.toml
+",
+    );
+
+    let output = mtrim(dir.path(), &["doctor"]);
+
+    assert_eq!(exit_code(&output), Some(0), "{}", stdout(&output));
+    assert!(!stdout(&output).contains("被 .gitignore 忽略"));
+}

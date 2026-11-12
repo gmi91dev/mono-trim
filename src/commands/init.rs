@@ -1,7 +1,8 @@
 //! `init`：用内置默认值重新初始化项目配置（永不改动用户配置）。
 
 use crate::Result;
-use crate::config::{Project, current_version};
+use crate::config::{Project, USER_CONFIG, current_version};
+use crate::git::SystemGit;
 
 pub fn run(project: &Project) -> Result<()> {
     let created_user = project.ensure_user_config()?;
@@ -23,6 +24,16 @@ pub fn run(project: &Project) -> Result<()> {
             project.user_config_display()
         );
     }
+    let ignored = project.ignored_configs(&SystemGit)?;
+    if !ignored.is_empty() {
+        for (display, rule) in ignored {
+            println!("⚠️  {display} 被 .gitignore 忽略（{rule}），配置文件需要提交给团队");
+        }
+        println!(
+            "   修复：在 .gitignore 中添加例外  !.mono-trim/  与  !{USER_CONFIG}（或 git add -f）"
+        );
+    }
+
     println!("👉 编辑完成后运行 mtrim doctor 校验");
     Ok(())
 }

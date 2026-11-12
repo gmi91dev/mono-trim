@@ -111,6 +111,28 @@ fn stdout_in(git: &dyn GitRunner, dir: &Path, args: &[&str]) -> Result<String> {
     stdout(git, &all)
 }
 
+/// 查询某个仓库相对路径是否被 .gitignore 忽略
+///
+/// 返回匹配的规则描述（例如 `.gitignore:3:mono-*.toml`）；未忽略或不是仓库时返回 None。
+pub fn ignore_reason(git: &dyn GitRunner, root: &Path, relative: &str) -> Result<Option<String>> {
+    let root = root.to_string_lossy().into_owned();
+
+    // 先用 -q 判定：注意 `check-ignore -v` 在命中“否定规则”（!pattern）时退出码也是 0，
+    // 只有 -q 才能正确区分“真的被忽略”。
+    let quiet = git.run(&["-C", &root, "check-ignore", "-q", "--", relative])?;
+    if !quiet.success {
+        return Ok(None);
+    }
+
+    let verbose = git.run(&["-C", &root, "check-ignore", "-v", "--", relative])?;
+    let reason = verbose.stdout.trim();
+    Ok(Some(if reason.is_empty() {
+        "未知规则".to_string()
+    } else {
+        reason.to_string()
+    }))
+}
+
 /// 解析 `dir` 仓库内的 git 路径（返回绝对路径）
 pub fn git_path_in(git: &dyn GitRunner, dir: &Path, path: &str) -> Result<PathBuf> {
     let raw = stdout_in(git, dir, &["rev-parse", "--git-path", path])?;
@@ -187,6 +209,38 @@ mod tests {
         let git = FakeGit::new().on("config --bool core.sparseCheckout", GitOutput::fail(""));
 
         assert!(!sparse_enabled(&git).unwrap());
+    }
+
+    #[test]
+    fn ignore_reason_returns_matching_rule() {
+        let git = FakeGit::new()
+            .on(
+                "-C /repo check-ignore -q -- mono-trim.toml",
+                GitOutput::ok(""),
+            )
+            .on(
+                "-C /repo check-ignore -v -- mono-trim.toml",
+                GitOutput::ok(".gitignore:3:mono-*.toml\tmono-trim.toml"),
+            );
+        let reason = ignore_reason(&git, Path::new("/repo"), "mono-trim.toml").unwrap();
+        assert_eq!(
+            reason.as_deref(),
+            Some(".gitignore:3:mono-*.toml\tmono-trim.toml")
+        );
+    }
+
+    #[test]
+    fn ignore_reason_returns_none_when_not_ignored() {
+        // 命中否定规则（!pattern）时 -q 的退出码是 1
+        let git = FakeGit::new().on(
+            "-C /repo check-ignore -q -- mono-trim.toml",
+            GitOutput::fail(""),
+        );
+        assert!(
+            ignore_reason(&git, Path::new("/repo"), "mono-trim.toml")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

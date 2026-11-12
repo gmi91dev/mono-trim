@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps
 指定版本或目录（`iex` 无法传参，改用脚本块）：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.4 -Dir D:\tools\mono-trim
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.ps1))) -Version 0.0.5 -Dir D:\tools\mono-trim
 ```
 
 ### macOS / Linux
@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/ins
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.4
+curl -fsSL https://raw.githubusercontent.com/gmi91dev/mono-trim/main/scripts/install.sh | bash -s -- --version 0.0.5
 ```
 
 ### 安装脚本参数
@@ -75,7 +75,7 @@ curl.exe -fsSL -o "$env:TEMP\mtrim-install.ps1" https://raw.githubusercontent.co
 ```bash
 # macOS / Linux：clone 后运行仓库内脚本
 git clone https://github.com/gmi91dev/mono-trim.git
-./mono-trim/scripts/install.sh --version 0.0.4
+./mono-trim/scripts/install.sh --version 0.0.5
 ```
 
 ### 从源码
@@ -140,7 +140,7 @@ targets = ["rust/", "Makefile", "Cargo.toml"]
 | `mtrim init` | 用内置默认值初始化项目配置（系统配置会重写，用户配置只在缺失时创建） |
 | `mtrim clone <仓库> [目录] [-p <命令>]` | 克隆仓库时**只检出 mono-trim 配置文件**，其余文件按 profile 再拉取 |
 | `mtrim update` | 升级系统 CLI；并把项目配置版本同步到当前 CLI（无变化不写文件） |
-| `mtrim doctor` | 校验系统配置与用户配置的合法性 |
+| `mtrim doctor` | 校验系统配置与用户配置的合法性（含是否被 `.gitignore` 忽略） |
 | `mtrim ls` | 列出用户自定义命令；`ls -a` 同时列出内置命令 |
 | `mtrim show` | 打印两份配置文件的位置与是否存在 |
 | `mtrim doc` | 把命令速查表写入 `doc_target`（可重复执行，原地更新） |
@@ -192,6 +192,12 @@ mtrim --version     # 查看当前版本
 - **Windows 首次运行提示 SmartScreen / macOS 提示来源未知**：二进制未做代码签名，选择"仍要运行"，或在 macOS 上执行 `xattr -d com.apple.quarantine $(which mtrim)`。
 - **公司内网无法访问 GitHub**：设置 `MONO_TRIM_MIRROR`（安装脚本与 `mtrim update` 都支持），指向内部静态目录（结构与本仓库 Release 一致）。
 - **路径规则**：目录以 `/` 结尾（`apps/ios/`），单文件不要以 `/` 结尾；不支持绝对路径与 `..`。
+- **配置文件被 `.gitignore` 忽略**：`mtrim init` 会提示、`mtrim doctor` 会报错。修复方式是在 `.gitignore` 中加例外：
+  ```gitignore
+  !.mono-trim/
+  !mono-trim.toml
+  ```
+  或临时 `git add -f .mono-trim/config.toml mono-trim.toml`。
 - **为什么要两份配置**：工具需要记录的版本与默认值和你的业务配置分开，`update` 重写系统配置时不会碰你的内容。
 
 更详细的规范见 [doc/mono-trim-spec.md](doc/mono-trim-spec.md)。
@@ -208,7 +214,7 @@ cargo test --all-targets
 
 更新快照：`INSTA_UPDATE=always cargo test --test golden`。
 
-发布：修改 `Cargo.toml` 版本 → `git tag v0.0.4 && git push origin v0.0.4`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
+发布：修改 `Cargo.toml` 版本 → `git tag v0.0.5 && git push origin v0.0.5`，GitHub Actions 会构建四平台产物并生成 `sha256sums.txt`。
 
 ## License
 

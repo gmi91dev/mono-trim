@@ -178,6 +178,28 @@ impl Project {
         Ok(true)
     }
 
+    /// 两份配置文件被 .gitignore 忽略时返回（显示路径, 匹配规则）
+    pub fn ignored_configs(&self, git: &dyn GitRunner) -> Result<Vec<(String, String)>> {
+        let candidates = [
+            (
+                self.system_config_display(),
+                format!("{TOOL_DIR}/{SYSTEM_CONFIG}"),
+            ),
+            (self.user_config_display(), USER_CONFIG.to_string()),
+        ];
+
+        let mut ignored = Vec::new();
+        for (display, relative) in candidates {
+            if !self.root.join(&relative).exists() {
+                continue;
+            }
+            if let Some(rule) = crate::git::ignore_reason(git, &self.root, &relative)? {
+                ignored.push((display, rule));
+            }
+        }
+        Ok(ignored)
+    }
+
     /// 文档输出位置（相对项目根目录解析）
     pub fn doc_target_path(&self, config: &Config) -> PathBuf {
         self.root.join(&config.doc_target)
